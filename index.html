@@ -7,158 +7,298 @@
 <script src="lib/ethers.umd.min.js"></script>
 <style>
 :root{
-  --bg:#14151a; --panel:#1d1f26; --panel2:#262932; --line:#33363f;
-  --text:#e8e9ed; --sub:#9a9ca6; --accent:#5fd4a8; --accent2:#c86bd8;
-  --warn:#f0b54a; --bad:#ef6a6a; --good:#5fd4a8;
+  --bg:#101114; --panel:#17181d; --panel2:#202228; --panel3:#2a2c33; --line:#2c2e36;
+  --text:#ecedf0; --sub:#9a9ca6; --accent:#5fd4a8; --accentDim:rgba(95,212,168,.12);
+  --pink:#d65db1; --warn:#f0b54a; --bad:#ef6a6a; --good:#5fd4a8;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:14px}
-header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-header h1{font-size:17px;margin:0;margin-right:auto}
-.wrap{max-width:1180px;margin:0 auto;padding:20px 16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
-@media(max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
-.card h2{font-size:15px;margin:0 0 12px}
-.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
-.row > label{color:var(--sub);min-width:70px}
-input,select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;min-width:0}
-input[type=number]{width:160px}
-input.addr{flex:1;min-width:200px;font-family:ui-monospace,monospace;font-size:12px}
-button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer}
-button:hover{border-color:var(--accent)}
-button.primary{background:var(--accent);color:#0d1a14;border-color:var(--accent);font-weight:600}
-button.danger{border-color:var(--bad);color:var(--bad)}
-button:disabled{opacity:.45;cursor:not-allowed}
-.chip{font-size:12px;padding:3px 8px;border-radius:99px;background:var(--panel2);color:var(--sub)}
-.chip.on{background:rgba(95,212,168,.15);color:var(--good)}
-.chip.off{background:rgba(239,106,106,.15);color:var(--bad)}
-.sub{color:var(--sub);font-size:12px}
-.big{font-size:20px;font-weight:600}
-.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
-.kv div:nth-child(odd){color:var(--sub)}
-.pos{background:var(--panel2);border-radius:10px;padding:12px;margin-bottom:12px}
-.pos .head{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
-.pos .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-.panel{border-top:1px dashed var(--line);margin-top:10px;padding-top:10px}
-#log{font-family:ui-monospace,monospace;font-size:12px;max-height:180px;overflow:auto;white-space:pre-wrap;color:var(--sub)}
-#log a{color:var(--accent)}
-.full{grid-column:1/-1}
-#pctRow button{padding:8px 9px}
-.tab.on{background:var(--accent);color:#0d1a14;border-color:var(--accent);font-weight:600}
-.plist{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
-.prow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer}
-.prow:last-child{border-bottom:0}
-.prow:hover{background:var(--panel2)}
-.prow.sel{background:rgba(95,212,168,.10)}
-.prow .main{flex:1;min-width:0}
-.prow .apr{color:var(--good);font-weight:600;white-space:nowrap}
-.star{background:none;border:0;font-size:16px;color:var(--sub);padding:2px 6px}
-.star.on{color:var(--warn)}
-.swapBox{background:var(--panel2);border-radius:10px;padding:12px;margin:10px 0}
-.warn{color:var(--warn)}
-.bad{color:var(--bad)}
 a{color:var(--accent)}
+header{display:flex;align-items:center;gap:18px;padding:12px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
+.logo{font-weight:700;font-size:17px;display:flex;align-items:center;gap:8px}
+.logo i{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--pink));display:inline-block}
+nav{display:flex;gap:4px;margin-right:auto}
+nav button{background:none;border:0;color:var(--sub);font-size:14px;padding:8px 10px}
+nav button.on{color:var(--text);font-weight:600}
+.layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;padding:20px 24px;max-width:1500px;margin:0 auto}
+.pairView{display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:20px}
+.posView{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px}
+@media(max-width:1250px){.pairView,.posView{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:900px){.layout{grid-template-columns:minmax(0,1fr);padding:16px}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.card + .card{margin-top:16px}
+h2{font-size:17px;margin:0 0 14px}
+h3{font-size:14px;margin:18px 0 10px;color:var(--text)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.between{justify-content:space-between}
+input,select,textarea{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:14px;min-width:0;font-family:inherit}
+input:focus{outline:none;border-color:var(--accent)}
+button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-size:13px;cursor:pointer;font-family:inherit}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#0b1712;border-color:var(--accent);font-weight:700}
+button.big{width:100%;padding:13px;font-size:15px}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button.link{background:none;border:0;color:var(--accent);padding:4px}
+button:disabled{opacity:.45;cursor:not-allowed}
+.chip{font-size:12px;padding:3px 9px;border-radius:99px;background:var(--panel3);color:var(--sub);white-space:nowrap}
+.chip.on{background:var(--accentDim);color:var(--good)}
+.chip.off{background:rgba(239,106,106,.15);color:var(--bad)}
+.chip.pink{background:var(--pink);color:#fff}
+.sub{color:var(--sub);font-size:12px}
+.good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+.mono{font-family:ui-monospace,monospace}
+/* トークンの丸アイコン（画像は読み込まず頭文字で表示） */
+.av{width:34px;height:34px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#fff;flex:none;border:2px solid var(--panel)}
+.avs{display:flex}.avs .av + .av{margin-left:-10px}
+/* ポートフォリオ */
+.pfTotal{font-size:30px;font-weight:700;margin:4px 0 16px}
+.pfRow{display:flex;align-items:center;gap:10px;padding:9px 0}
+.pfRow .main{flex:1;min-width:0}
+.pfRow .r{text-align:right}
+/* ペア一覧 */
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.tabs button{border:0;background:var(--panel2);color:var(--sub)}
+.tabs button.on{background:var(--panel3);color:var(--text);font-weight:600}
+.plist{display:flex;flex-direction:column;gap:10px;max-height:640px;overflow:auto;padding-right:4px}
+.pcard{background:var(--panel2);border:1px solid transparent;border-radius:12px;padding:14px;cursor:pointer}
+.pcard:hover{border-color:var(--line)}
+.pcard.sel{border-color:var(--accent);background:rgba(95,212,168,.06)}
+.pcard .top{display:flex;gap:12px;align-items:center}
+.pcard .main{flex:1;min-width:0}
+.pcard .bottom{display:flex;justify-content:space-between;margin-top:10px;font-size:13px}
+.apr{color:var(--good);font-weight:700}
+.star{background:none;border:0;font-size:18px;color:var(--sub);padding:2px 6px}
+.star.on{color:var(--warn)}
+/* 手数料レベル */
+.fees{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+@media(max-width:600px){.fees{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.fee{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px;text-align:left;position:relative;min-height:84px}
+.fee b{display:block;color:var(--good);font-size:14px;margin-bottom:4px}
+.fee span{font-size:11px;color:var(--sub);line-height:1.4;display:block}
+.fee em{font-style:normal;font-size:11px;display:block;margin-top:4px}
+.fee.on{border-color:var(--accent);background:var(--accentDim)}
+.fee.on::after{content:"✓";position:absolute;top:8px;right:10px;width:16px;height:16px;border-radius:50%;background:var(--accent);color:#0b1712;font-size:11px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.fee.none{opacity:.45}
+/* レンジ（最大・最小） */
+.rrow{display:grid;grid-template-columns:44px minmax(0,1fr) 20px 86px 18px;gap:8px;align-items:center;margin-bottom:10px}
+.rrow label{color:var(--sub)}
+.rrow input{width:100%}
+.presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.presets button{padding:7px 9px;font-size:12px}
+/* 入れる額 */
+.amt{background:var(--panel2);border-radius:12px;padding:12px;margin-bottom:10px}
+.amt .line{display:flex;gap:8px;align-items:center}
+.amt input{flex:1;font-size:18px;background:transparent;border:0;padding:6px 2px}
+.amt .tok{display:flex;align-items:center;gap:6px;background:var(--panel3);border-radius:99px;padding:5px 12px 5px 5px;font-weight:600;white-space:nowrap}
+.amt .tok .av{width:24px;height:24px;font-size:10px;border:0}
+.fracs{display:flex;gap:6px;margin-top:8px}
+.fracs button{flex:1;padding:6px;font-size:12px}
+.box{background:var(--panel2);border-radius:12px;padding:12px;margin:10px 0}
+details.box summary{cursor:pointer;font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;font-size:13px}
+.kv > :nth-child(odd){color:var(--sub)}
+.kv > :nth-child(even){text-align:right}
+/* ポジション */
+.posGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
+.pos{background:var(--panel2);border-radius:14px;padding:14px;border:1px solid var(--line)}
+.pos .head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.pos .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.pos .acts button{font-size:12px;padding:7px 10px}
+.bar{position:relative;height:8px;border-radius:99px;background:var(--panel3);margin:22px 4px 26px}
+.bar .in{position:absolute;top:0;bottom:0;border-radius:99px;background:var(--accent);opacity:.5}
+.bar .now{position:absolute;top:-6px;width:3px;height:20px;background:var(--text);border-radius:2px}
+.bar .lbl{position:absolute;top:13px;font-size:11px;color:var(--sub);white-space:nowrap;transform:translateX(-50%)}
+.bar .nowLbl{position:absolute;top:-22px;font-size:11px;white-space:nowrap;transform:translateX(-50%)}
+.panel{border-top:1px dashed var(--line);margin-top:12px;padding-top:12px}
+.stat{background:var(--panel2);border-radius:12px;padding:14px;flex:1;min-width:160px}
+.stat .v{font-size:20px;font-weight:700;margin-top:4px}
+/* トークン選択 */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
+.modal.open{display:flex}
+.modal .in{background:var(--panel);border:1px solid var(--line);border-radius:16px;width:440px;max-width:100%;max-height:80vh;display:flex;flex-direction:column;padding:20px}
+.tchips{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.tchips button{border-radius:99px;display:flex;align-items:center;gap:6px;padding:5px 12px 5px 5px}
+.tchips .av{width:22px;height:22px;font-size:9px;border:0}
+.tlist{overflow:auto;border-top:1px solid var(--line);padding-top:6px}
+.trow{display:flex;gap:12px;align-items:center;padding:9px 6px;border-radius:10px;cursor:pointer}
+.trow:hover{background:var(--panel2)}
+.tsel{width:100%;display:flex;justify-content:space-between;align-items:center;text-align:left;padding:12px}
+#log{font-family:ui-monospace,monospace;font-size:12px;max-height:160px;overflow:auto;white-space:pre-wrap;color:var(--sub)}
+#log a{color:var(--accent)}
+.empty{color:var(--sub);padding:30px 10px;text-align:center}
 </style>
 </head>
 <body>
 <header>
-  <h1>稼ぎ君 流動性管理 <span class="sub">Uniswap v3</span></h1>
+  <div class="logo"><i></i>稼ぎ君</div>
+  <nav>
+    <button id="navPair" class="on">ペアを選択</button>
+    <button id="navPos">私の流動性</button>
+  </nav>
   <select id="chainSel" title="チェーン"></select>
   <span id="netChip" class="chip">未接続</span>
-  <span id="acct" class="sub"></span>
   <button id="btnConnect" class="primary">メタマスクに接続</button>
 </header>
 
-<div class="wrap">
-  <!-- 新しいポジション -->
-  <section class="card">
-    <h2>① ペアを選ぶ</h2>
-    <div class="row" id="pickTabs">
-      <button data-sort="vol" class="tab on">取引高順</button>
-      <button data-sort="apr" class="tab">APRが高い順</button>
-      <button data-sort="tvl" class="tab">流動性順</button>
-      <button data-sort="fav" class="tab">☆ お気に入り</button>
+<div class="layout">
+  <!-- 左：ポートフォリオ -->
+  <aside>
+    <div class="card">
+      <div class="sub">ポートフォリオ</div>
+      <div class="pfTotal" id="pfTotal">$0</div>
+      <div class="row between"><span class="sub">トークン</span><button class="link" id="btnPfReload">リロード</button></div>
+      <div id="pfList"><div class="sub">メタマスクに接続すると表示されます。</div></div>
+      <div class="sub" id="acct" style="margin-top:10px;word-break:break-all"></div>
     </div>
-    <div class="row">
-      <input id="pairQ" placeholder="トークン名・アドレスで検索（例：NVDA, Index）" style="flex:1">
-      <select id="minTvl"><option value="0">流動性 制限なし</option><option value="1000">$1千以上</option><option value="10000" selected>$1万以上</option><option value="100000">$10万以上</option></select>
-    </div>
-    <div id="pairList" class="plist"><div class="sub">読み込み中…</div></div>
-    <div class="row"><button id="btnMore">もっと読み込む</button><span id="pairMsg" class="sub"></span></div>
-    <div class="sub" style="margin-bottom:10px">推定APR＝24時間の取引高×手数料率÷流動性×365（全価格帯の平均。レンジを狭くすると上がり、外れると0）。一覧はUniswap v3のプールのみ。</div>
-    <details style="margin-bottom:10px"><summary class="sub" style="cursor:pointer">アドレスで指定する</summary>
-      <div class="row" style="margin-top:8px"><label>トークンA</label><input id="tokA" class="addr" placeholder="0x..."></div>
-      <div class="row"><label>トークンB</label><input id="tokB" class="addr" placeholder="0x..."></div>
-      <div class="row"><label>手数料</label>
-        <select id="feeSel"><option value="100">0.01%</option><option value="500">0.05%</option><option value="3000">0.3%</option><option value="10000" selected>1%</option></select>
-        <button id="btnLoadPool">このペアを使う</button>
-      </div>
-    </details>
-    <div class="sub" id="poolMsg"></div>
-    <div id="poolInfo" style="display:none">
-      <div class="row" style="margin-top:6px">
-        <span class="chip on">選択中</span><b id="pairName"></b><button id="btnFav" title="お気に入り">☆</button>
-      </div>
-      <div class="row">
-        <span class="big" id="priceTxt"></span>
-        <button id="btnInvert" title="価格の向きを入れ替え">⇄</button>
-      </div>
-      <div class="sub" id="poolSub"></div>
+  </aside>
+
+  <main>
+    <!-- ペアを選択 -->
+    <div id="viewPair" class="pairView">
+      <section>
+        <div class="card" id="pickBox">
+          <div class="row between"><h2 style="margin:0">ペアを選択</h2><button class="link" id="btnShowCreate">＋ ペアを作成</button></div>
+          <div class="tabs" id="pickTabs">
+            <button data-sort="vol" class="on">ペア一覧</button>
+            <button data-sort="apr">APRが高い順</button>
+            <button data-sort="tvl">流動性順</button>
+            <button data-sort="fav">☆ お気に入り</button>
+          </div>
+          <div class="row">
+            <input id="pairQ" placeholder="トークン名・アドレスで検索（例：NVDA、Index）" style="flex:1">
+            <select id="minTvl"><option value="0">流動性 制限なし</option><option value="1000">$1千以上</option><option value="10000" selected>$1万以上</option><option value="100000">$10万以上</option></select>
+          </div>
+          <div id="pairList" class="plist"><div class="empty">読み込み中…</div></div>
+          <div class="row" style="margin-top:12px"><button id="btnMore">もっと読み込む</button><span id="pairMsg" class="sub"></span></div>
+          <div class="sub">平均APR＝24時間の取引高×手数料率÷流動性×365（全価格帯の平均。レンジを狭くすると上がり、外れると0）。Uniswap v3 のプールのみ。</div>
+        </div>
+
+        <!-- ペアを作成 -->
+        <div class="card" id="createBox" style="display:none">
+          <div class="row between"><h2 style="margin:0">ペアを作成</h2><button class="link" id="btnCreateCancel">キャンセル</button></div>
+          <div class="sub" style="margin-bottom:6px">トークンA</div>
+          <button class="tsel" id="cTokA"><span>トークンを選択</span><span>⌄</span></button>
+          <div class="sub" style="margin:14px 0 6px">トークンB</div>
+          <button class="tsel" id="cTokB"><span>トークンを選択</span><span>⌄</span></button>
+          <div class="sub" style="margin:18px 0 8px">手数料レベル</div>
+          <div class="fees" id="cFees"></div>
+          <div id="cMsg" class="sub" style="margin-top:10px"></div>
+          <div class="sub" style="margin:16px 0 6px">メモ（最大15文字まで）</div>
+          <input id="cMemo" maxlength="15" style="width:100%" placeholder="例：Index 狭め">
+          <button class="primary big" id="btnCreate" style="margin-top:16px">作成</button>
+          <div class="sub" style="margin-top:10px">作成を押すと、右の「流動性を提供」にこのペアが入ります。レンジ幅と入れる額を決めて「流動性を提供」で完了です。</div>
+        </div>
+      </section>
+
+      <!-- 右：流動性を提供 -->
+      <section>
+        <div class="card" id="provide">
+          <div class="sub" id="poolMsg"></div>
+          <div id="poolInfo" style="display:none">
+            <div class="row between" style="margin-bottom:4px">
+              <h2 style="margin:0" id="pairName"></h2>
+              <button class="star" id="btnFav" title="お気に入り">☆</button>
+            </div>
+            <div class="row" style="margin-bottom:2px"><span id="ratioTxt"></span></div>
+            <div class="row"><span class="sub" id="priceTxt"></span><button class="link" id="btnInvert" title="価格の向きを入れ替え">⇄</button></div>
+
+            <div id="rebuildBox" class="box" style="display:none;border:1px solid var(--warn)">
+              <b>レンジの作り直し</b>
+              <div id="rebuildTxt" class="sub" style="margin:6px 0"></div>
+              <div class="row" style="margin:0"><button id="btnRebuild" class="primary">作り直す</button><button id="btnRebuildCancel">やめる</button></div>
+              <div id="rebuildStep" class="sub" style="margin-top:6px"></div>
+            </div>
+
+            <h3>手数料レベル</h3>
+            <div class="fees" id="pFees"></div>
+
+            <h3>レンジ幅</h3>
+            <div class="presets" id="pctRow">
+              <button data-pct="5">±5%</button><button data-pct="10">±10%</button><button data-pct="20">±20%</button>
+              <button data-pct="30">±30%</button><button data-pct="50">±50%</button><button data-pct="full">フルレンジ</button>
+              <span style="white-space:nowrap;display:inline-flex;align-items:center;gap:2px"><span class="sub">±</span><input id="pctIn" type="number" min="0.1" max="99" step="any" placeholder="15" style="width:58px;padding:7px 6px"><span class="sub">%</span></span>
+            </div>
+            <div class="rrow"><label>最大</label><input id="maxP" type="number" step="any" placeholder="価格"><span class="good">↑</span><input id="maxR" type="number" step="any" placeholder="レート"><span class="sub">%</span></div>
+            <div class="rrow"><label>最小</label><input id="minP" type="number" step="any" placeholder="価格"><span class="bad">↓</span><input id="minR" type="number" step="any" placeholder="レート"><span class="sub">%</span></div>
+            <div class="sub" id="unitTxt" style="margin:-4px 0 6px 52px"></div>
+            <div class="sub" id="rangeInfo"></div>
+
+            <h3>入れる額</h3>
+            <div class="amt">
+              <div class="line"><input id="amt0" type="number" step="any" min="0" placeholder="0"><span class="tok" id="lab0"></span></div>
+              <div class="row between" style="margin:4px 0 0"><span class="sub" id="usd0">$0</span><span class="sub" id="bal0"></span></div>
+              <div class="fracs" data-i="0"><button data-frac="0.25">25%</button><button data-frac="0.5">50%</button><button data-frac="0.75">75%</button><button data-frac="1">100%</button></div>
+            </div>
+            <div class="amt">
+              <div class="line"><input id="amt1" type="number" step="any" min="0" placeholder="0"><span class="tok" id="lab1"></span></div>
+              <div class="row between" style="margin:4px 0 0"><span class="sub" id="usd1">$0</span><span class="sub" id="bal1"></span></div>
+              <div class="fracs" data-i="1"><button data-frac="0.25">25%</button><button data-frac="0.5">50%</button><button data-frac="0.75">75%</button><button data-frac="1">100%</button></div>
+            </div>
+            <div class="row" id="ethPayRow" style="display:none"><label style="color:var(--text)"><input type="checkbox" id="payEth" checked> WETHの代わりにETHで支払う</label></div>
+            <div class="row between"><span class="sub">合計</span><b id="usdTotal">$0</b></div>
+
+            <details class="box" id="swapDetails">
+              <summary>比率をそろえる（スワップ）</summary>
+              <div class="sub" style="margin:8px 0">手持ちを、このレンジに必要な比率に交換します。片方しか持っていないときに使います。</div>
+              <div class="row"><span class="sub" id="slab0" style="min-width:60px"></span><input id="use0" type="number" step="any" min="0" placeholder="使う量" style="flex:1"></div>
+              <div class="row"><span class="sub" id="slab1" style="min-width:60px"></span><input id="use1" type="number" step="any" min="0" placeholder="使う量" style="flex:1"></div>
+              <div class="row"><button id="btnUseBal">残高を入れる</button><button id="btnQuote">見積もり</button></div>
+              <div id="swapInfo" class="sub"></div>
+              <div class="row" id="swapGoRow" style="display:none;margin-top:8px"><button id="btnSwap" class="primary">交換する</button></div>
+            </details>
+
+            <div class="row"><span class="sub">メモ</span><input id="memo" maxlength="15" placeholder="最大15文字（任意）" style="flex:1"></div>
+            <div class="row"><span class="sub">許容ズレ</span><select id="slip"><option value="0.5">0.5%</option><option value="1" selected>1%</option><option value="2">2%</option><option value="5">5%</option></select></div>
+            <button id="btnMint" class="primary big">流動性を提供</button>
+            <div class="sub" style="margin-top:8px">このアプリは手数料を取りません（ガス代のみ）。ポジションも手数料も、接続したウォレットに入ります。</div>
+          </div>
+        </div>
+
+        <div class="card" id="detailCard" style="display:none">
+          <h2 id="detailTitle">プールの詳細</h2>
+          <div class="kv" id="poolDetail"></div>
+          <div class="sub" id="poolSub" style="margin-top:12px"></div>
+        </div>
+      </section>
     </div>
 
-    <div id="rangeBox" style="display:none">
-      <div id="rebuildBox" class="swapBox" style="display:none;border:1px solid var(--warn);margin-top:16px">
-        <b>レンジの作り直し</b>
-        <div id="rebuildTxt" class="sub" style="margin:6px 0"></div>
-        <div class="row"><button id="btnRebuild" class="primary">作り直す</button><button id="btnRebuildCancel">やめる</button></div>
-        <div id="rebuildStep" class="sub"></div>
-      </div>
-      <h2 style="margin-top:20px">② レンジ幅を決める</h2>
-      <div class="row" id="pctRow" style="gap:6px">
-        <button data-pct="5">±5%</button><button data-pct="10">±10%</button><button data-pct="20">±20%</button>
-        <button data-pct="30">±30%</button><button data-pct="50">±50%</button><button data-pct="full">フルレンジ</button>
-        <span style="white-space:nowrap;display:inline-flex;align-items:center;gap:2px"><span class="sub">±</span><input id="pctIn" type="number" min="0.1" max="99" step="any" placeholder="15" style="width:56px;padding:8px 6px"><span class="sub">%</span></span>
-      </div>
-      <div class="row"><label>下限</label><input id="minP" type="number" step="any"><span class="sub unitTxt"></span></div>
-      <div class="row"><label>上限</label><input id="maxP" type="number" step="any"><span class="sub unitTxt"></span></div>
-      <div class="sub" id="rangeInfo"></div>
-
-      <h2 style="margin-top:20px">③ 入れる額</h2>
-      <div class="row"><label id="lab0"></label><input id="amt0" type="number" step="any" min="0"><button class="maxBtn" data-i="0">最大</button><span class="sub" id="bal0"></span></div>
-      <div class="row"><label id="lab1"></label><input id="amt1" type="number" step="any" min="0"><button class="maxBtn" data-i="1">最大</button><span class="sub" id="bal1"></span></div>
-      <div class="row" id="ethPayRow" style="display:none"><label></label><label style="min-width:0;color:var(--text)"><input type="checkbox" id="payEth" checked> WETHの代わりにETHで支払う</label></div>
-      <div class="swapBox">
-        <div class="row" style="margin-bottom:6px"><b>比率をそろえる（スワップ）</b></div>
-        <div class="sub" style="margin-bottom:8px">手持ちを、このレンジに必要な比率に交換します。片方しか持っていないとき、レンジを作り直すときに使います。</div>
-        <div class="row"><label id="slab0"></label><input id="use0" type="number" step="any" min="0"><span class="sub">使う量</span></div>
-        <div class="row"><label id="slab1"></label><input id="use1" type="number" step="any" min="0"><span class="sub">使う量</span></div>
-        <div class="row"><button id="btnUseBal">残高を入れる</button><button id="btnQuote">見積もり</button></div>
-        <div id="swapInfo" class="sub"></div>
-        <div class="row" id="swapGoRow" style="display:none;margin-top:8px"><button id="btnSwap" class="primary">交換する</button></div>
-      </div>
-      <div class="row"><label>許容ズレ</label><select id="slip"><option value="0.5">0.5%</option><option value="1" selected>1%</option><option value="2">2%</option><option value="5">5%</option></select></div>
-      <div class="row"><button id="btnMint" class="primary">流動性を追加（新規ポジション）</button></div>
-      <div class="sub">手数料はこのアプリでは一切取りません（ガス代のみ）。ポジションのNFTも手数料も、接続したウォレットに入ります。</div>
+    <!-- 私の流動性 -->
+    <div id="viewPos" class="posView" style="display:none">
+      <section class="card">
+        <div class="row between"><h2 style="margin:0">私の流動性</h2>
+          <div class="row" style="margin:0"><label class="sub"><input type="checkbox" id="showClosed"> 閉じたものも表示</label><button class="link" id="btnReload">リロード</button></div></div>
+        <div class="row" id="posStats"></div>
+        <div id="posList"><div class="empty">メタマスクに接続すると表示されます。</div></div>
+      </section>
+      <aside>
+        <div class="card">
+          <h2>受け取り</h2>
+          <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="recvEth" checked> WETHはETHに戻して受け取る</label>
+        </div>
+        <div class="card">
+          <h2>番号で見る</h2>
+          <div class="row"><input id="lookId" type="number" placeholder="例：1466328" style="flex:1"><button id="btnLook">表示</button></div>
+          <div class="sub">他のウォレットのポジションも見るだけならできます（Smart Vault のものなど）。</div>
+          <div id="lookBox" style="margin-top:10px"></div>
+        </div>
+      </aside>
     </div>
-  </section>
 
-  <!-- 自分のポジション -->
-  <section class="card">
-    <div class="row" style="justify-content:space-between"><h2 style="margin:0">自分のポジション</h2>
-      <div><label class="sub"><input type="checkbox" id="showClosed"> 閉じたものも表示</label> <button id="btnReload">リロード</button></div></div>
-    <div class="row" style="margin-top:6px">
-      <label>受け取り</label>
-      <label style="min-width:0;color:var(--text)"><input type="checkbox" id="recvEth" checked> WETHはETHに戻して受け取る</label>
+    <div class="card" style="margin-top:20px">
+      <h2 style="font-size:14px">操作ログ</h2>
+      <div id="log"></div>
     </div>
-    <div id="posList" class="sub">メタマスクに接続すると表示されます。</div>
-    <div class="row" style="margin-top:16px"><label>番号で見る</label><input id="lookId" type="number" placeholder="例：1466328"><button id="btnLook">表示（見るだけ）</button></div>
-    <div id="lookBox"></div>
-  </section>
+  </main>
+</div>
 
-  <section class="card full">
-    <h2>操作ログ</h2>
-    <div id="log"></div>
-  </section>
+<!-- トークンを選択 -->
+<div class="modal" id="tokModal">
+  <div class="in">
+    <div class="row between" style="margin:0"><h2 style="margin:0">トークンを選択</h2><button class="link" id="tokClose" style="font-size:20px;color:var(--sub)">×</button></div>
+    <input id="tokQ" placeholder="名前で検索するか、アドレスを貼り付けてください" style="margin-top:14px">
+    <div class="tchips" id="tokChips"></div>
+    <div class="tlist" id="tokList"></div>
+  </div>
 </div>
 
 <script>
@@ -194,11 +334,17 @@ const CHAIN_KEY = (() => {
 const CHAIN = CHAINS[CHAIN_KEY];
 const NPM = CHAIN.npm, FACTORY = CHAIN.factory, WETH = CHAIN.weth;
 const DEFAULT_FAVS = CHAIN.favs;
-// ペア一覧の取得元（GeckoTerminal 公開API・無料・1分30回まで）
+// ペア一覧・ドル価格の取得元（GeckoTerminal 公開API・無料・1分30回まで）
 const GECKO = 'https://api.geckoterminal.com/api/v2';
 const GECKO_DEX = CHAIN.geckoDex;
 const MAX128 = (1n << 128n) - 1n;
 const MIN_TICK = -887272, MAX_TICK = 887272;
+const FEE_LEVELS = [
+  { fee: 100, label: '0.01%', desc: '非常に安定したペアに最適', ex: 'USDT/USDC など、価格がほぼ動かないペア' },
+  { fee: 500, label: '0.05%', desc: '安定したペアに最適', ex: 'ETH/stETH など、値動きの小さいペア' },
+  { fee: 3000, label: '0.3%', desc: 'ほとんどのペアに最適', ex: 'ETH/USDC など、人気のペア' },
+  { fee: 10000, label: '1%', desc: 'マイナーなペアに最適', ex: '値動きの大きいペア' },
+];
 
 const NPM_ABI = [
   'function positions(uint256) view returns (uint96 nonce,address operator,address token0,address token1,uint24 fee,int24 tickLower,int24 tickUpper,uint128 liquidity,uint256 fg0,uint256 fg1,uint128 tokensOwed0,uint128 tokensOwed1)',
@@ -213,6 +359,7 @@ const NPM_ABI = [
   'function refundETH() payable',
   'function unwrapWETH9(uint256 amountMinimum,address recipient) payable',
   'function sweepToken(address token,uint256 amountMinimum,address recipient) payable',
+  'event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
 ];
 const FACTORY_ABI = ['function getPool(address,address,uint24) view returns (address)'];
 const ROUTER_ABI = [
@@ -229,7 +376,7 @@ const POOL_ABI = [
   'function token0() view returns (address)', 'function token1() view returns (address)', 'function fee() view returns (uint24)',
 ];
 const ERC20_ABI = [
-  'function symbol() view returns (string)', 'function decimals() view returns (uint8)',
+  'function symbol() view returns (string)', 'function decimals() view returns (uint8)', 'function name() view returns (string)',
   'function balanceOf(address) view returns (uint256)', 'function allowance(address,address) view returns (uint256)',
   'function approve(address,uint256) returns (bool)',
 ];
@@ -241,8 +388,12 @@ const npmIface = new ethers.Interface(NPM_ABI);
 const routerIface = new ethers.Interface(ROUTER_ABI);
 const quoterR = new ethers.Contract(CHAIN.quoter, QUOTER_ABI, rpc);
 
-const S = { account: null, signer: null, pool: null, invert: false, tokenCache: {} };
+const S = { account: null, signer: null, pool: null, invert: false, tokenCache: {}, prices: {}, tokInfo: {}, positions: {} };
 const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
 
 // ===== 共通 =====
 function log(msg, hash) {
@@ -264,13 +415,21 @@ function fmt(x, d = 6) {
   if (a >= 1) return x.toLocaleString('en-US', { maximumFractionDigits: 4 });
   return x.toPrecision(d).replace(/\.?0+$/, '');
 }
+const usd = x => !isFinite(x) ? '-' : x >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : x >= 1e3 ? `$${(x / 1e3).toFixed(2)}K` : `$${x.toFixed(2)}`;
 // 外部から来る名前は記号を除いてから画面に出す（悪意あるトークン名対策）
-const clean = s => String(s).replace(/[<>&"'`]/g, '').slice(0, 60);
+const clean = s => String(s).replace(/&amp;/g, '&').replace(/&/g, '＆').replace(/[<>"'`]/g, '').slice(0, 60);
 const toNum = (big, dec) => Number(ethers.formatUnits(big, dec));
 const floorBig = x => (x > 0 && isFinite(x)) ? BigInt(Math.floor(x)) : 0n;
 const deadline = () => BigInt(Math.floor(Date.now() / 1000) + 20 * 60);
 const tickToRaw = t => Math.pow(1.0001, t);
 const sqrtAt = t => Math.pow(1.0001, t / 2);
+const showSym = t => t.isWeth ? 'WETH' : t.symbol;
+// 頭文字の丸アイコン（色はアドレスから決める）
+function av(sym, addr = sym) {
+  let h = 0; for (const c of String(addr)) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `<span class="av" style="background:hsl(${h},45%,42%)">${clean(sym).slice(0, 3)}</span>`;
+}
+const priceOf = t => S.prices[(t.addr || t).toLowerCase()];
 
 async function token(addr) {
   const k = addr.toLowerCase();
@@ -290,6 +449,14 @@ function amountsFromL(L, sqrtP, tl, tu) {
   return [L * (sb - sqrtP) / (sqrtP * sb), L * (sqrtP - sa)];
 }
 
+// ===== 画面の切り替え =====
+function showView(v) {
+  $('viewPair').style.display = v === 'pair' ? '' : 'none';
+  $('viewPos').style.display = v === 'pos' ? '' : 'none';
+  $('navPair').classList.toggle('on', v === 'pair');
+  $('navPos').classList.toggle('on', v === 'pos');
+}
+
 // ===== ウォレット =====
 async function connect() {
   if (!window.ethereum) { alert('メタマスクが見つかりません。Chromeにメタマスクを入れてください。'); return; }
@@ -299,12 +466,13 @@ async function connect() {
     await ensureChain();
     S.signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
     S.account = await S.signer.getAddress();
-    $('acct').textContent = S.account.slice(0, 6) + '…' + S.account.slice(-4);
-    $('btnConnect').textContent = '接続済み';
+    $('btnConnect').textContent = S.account.slice(0, 6) + '…' + S.account.slice(-4);
+    $('acct').textContent = '接続中のウォレット ' + S.account;
     $('netChip').textContent = CHAIN.name; $('netChip').className = 'chip on';
     log('接続しました ' + S.account);
     if (S.pool) await refreshBalances();
     await loadPositions();
+    loadPortfolio();
   } catch (e) { log('接続エラー: ' + errMsg(e)); }
 }
 async function ensureChain() {
@@ -342,12 +510,7 @@ async function ensureAllowance(tok, amount, spender = NPM) {
   await sendTx(`${tok.symbol} の使用許可`, c.approve(spender, amount));
 }
 
-// ===== ペア一覧 =====
-const store = {
-  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-};
-const L = { sort: 'vol', page: 0, pools: [], search: null, favs: store.get('nba.favs.' + CHAIN_KEY, DEFAULT_FAVS), busy: false };
+// ===== GeckoTerminal（一覧・ドル価格） =====
 let geckoLast = 0;
 async function gecko(path) {
   const wait = geckoLast + 2100 - Date.now(); // 回数制限よけ：2.1秒あける
@@ -357,32 +520,83 @@ async function gecko(path) {
   for (let i = 0; ; i++) {
     let r = null;
     try { r = await fetch(GECKO + path, { headers: { accept: 'application/json' } }); } catch {}
-    if (r?.ok) return r.json();
-    if (i >= 2) throw new Error('一覧の取得に失敗しました（回数制限）。1分ほど待ってから「もっと読み込む」を押してください。');
+    if (r?.ok) { const j = await r.json(); absorbGecko(j); return j; }
+    if (i >= 2) throw new Error('一覧の取得に失敗しました（回数制限）。1分ほど待ってからもう一度。');
     await new Promise(res => setTimeout(res, 15000 * (i + 1)));
     geckoLast = Date.now();
   }
 }
+// 返ってきたデータから、トークン名とドル価格を覚えておく
+function absorbGecko(j) {
+  (j.included || []).forEach(t => {
+    if (t.type !== 'token') return;
+    const a = t.attributes; S.tokInfo[a.address.toLowerCase()] = { symbol: clean(a.symbol), name: clean(a.name || a.symbol) };
+  });
+  [].concat(j.data || []).forEach(x => {
+    const a = x?.attributes, r = x?.relationships; if (!a || !r) return;
+    const id = d => d?.data?.id?.split('_').pop()?.toLowerCase();
+    const b = id(r.base_token), q = id(r.quote_token);
+    if (b && a.base_token_price_usd) S.prices[b] = Number(a.base_token_price_usd);
+    if (q && a.quote_token_price_usd) S.prices[q] = Number(a.quote_token_price_usd);
+  });
+}
+async function ensurePrices(addrs) {
+  const miss = [...new Set(addrs.map(a => a.toLowerCase()))].filter(a => S.prices[a] == null).slice(0, 30);
+  if (!miss.length) return;
+  try {
+    const j = await gecko(`/simple/networks/${CHAIN.gecko}/token_price/${miss.join(',')}`);
+    Object.entries(j?.data?.attributes?.token_prices || {}).forEach(([a, p]) => { if (p != null) S.prices[a.toLowerCase()] = Number(p); });
+  } catch {}
+}
+
+// ===== ポートフォリオ（左） =====
+async function loadPortfolio() {
+  if (!S.account) return;
+  try {
+    const set = new Set([WETH.toLowerCase(), ...store.get('nba.pfTokens.' + CHAIN_KEY, [])]);
+    if (S.pool) [S.pool.t0, S.pool.t1].forEach(t => set.add(t.addr.toLowerCase()));
+    Object.values(S.positions).forEach(p => [p.t0, p.t1].forEach(t => set.add(t.addr.toLowerCase())));
+    store.set('nba.pfTokens.' + CHAIN_KEY, [...set].slice(0, 30));
+    const toks = await Promise.all([...set].map(token));
+    const [eth, ...bals] = await Promise.all([rpc.getBalance(S.account), ...toks.map(t => new ethers.Contract(t.addr, ERC20_ABI, rpc).balanceOf(S.account))]);
+    await ensurePrices([...set]);
+    const rows = [{ sym: 'ETH', name: 'Ethereum', addr: 'eth', amt: toNum(eth, 18), p: priceOf(WETH) }]
+      .concat(toks.map((t, i) => ({ sym: t.symbol, name: S.tokInfo[t.addr.toLowerCase()]?.name || t.symbol, addr: t.addr, amt: toNum(bals[i], t.decimals), p: priceOf(t) })))
+      .filter(r => r.amt > 0);
+    rows.forEach(r => r.v = r.p != null ? r.amt * r.p : null);
+    rows.sort((a, b) => (b.v ?? -1) - (a.v ?? -1));
+    $('pfTotal').textContent = usd(rows.reduce((s, r) => s + (r.v || 0), 0));
+    $('pfList').innerHTML = rows.length ? rows.map(r => `<div class="pfRow">${av(r.sym, r.addr)}
+      <div class="main"><div>${r.name}</div><div class="sub">${fmt(r.amt)} ${r.sym}</div></div>
+      <div class="r">${r.v != null ? usd(r.v) : '<span class="sub">価格不明</span>'}</div></div>`).join('')
+      : '<div class="sub">トークンがありません。</div>';
+  } catch (e) { $('pfList').innerHTML = `<div class="sub">読み込みエラー：${errMsg(e)}</div>`; }
+}
+
+// ===== ペア一覧（中央） =====
+const L = { sort: 'vol', page: 0, pools: [], search: null, favs: store.get('nba.favs.' + CHAIN_KEY, DEFAULT_FAVS), busy: false };
 function geckoPools(json) {
   return (json.data || []).filter(x => x.relationships?.dex?.data?.id === GECKO_DEX).map(x => {
     const a = x.attributes, m = a.name.match(/([\d.]+)%\s*$/);
     const fee = m ? Number(m[1]) : null, tvl = Number(a.reserve_in_usd) || 0, vol = Number(a.volume_usd?.h24) || 0;
-    return { addr: a.address.toLowerCase(), name: clean(a.name), fee, tvl, vol, apr: fee && tvl > 0 ? vol * fee / tvl * 365 : 0 };
+    const id = d => d?.data?.id?.split('_').pop()?.toLowerCase();
+    return { addr: a.address.toLowerCase(), name: clean(a.name), fee, tvl, vol, apr: fee && tvl > 0 ? vol * fee / tvl * 365 : 0,
+      base: id(x.relationships.base_token), quote: id(x.relationships.quote_token) };
   });
 }
-const usd = x => x >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : x >= 1e3 ? `$${(x / 1e3).toFixed(1)}K` : `$${x.toFixed(0)}`;
 const isFav = addr => L.favs.some(f => f.addr === addr.toLowerCase());
 function toggleFav(addr, name) {
   addr = addr.toLowerCase();
   L.favs = isFav(addr) ? L.favs.filter(f => f.addr !== addr) : [...L.favs, { addr, name }];
   store.set('nba.favs.' + CHAIN_KEY, L.favs);
   renderPairs(); if (S.pool) $('btnFav').textContent = isFav(S.pool.addr) ? '★' : '☆';
+  $('btnFav').classList.toggle('on', !!S.pool && isFav(S.pool.addr));
 }
 async function loadMorePairs() {
   if (L.busy || L.page >= 10) return;
   L.busy = true; if (!L.search) $('pairMsg').textContent = '読み込み中…';
   try {
-    const j = await gecko(`/networks/${CHAIN.gecko}/dexes/${GECKO_DEX}/pools?page=${L.page + 1}&sort=h24_volume_usd_desc`);
+    const j = await gecko(`/networks/${CHAIN.gecko}/dexes/${GECKO_DEX}/pools?page=${L.page + 1}&sort=h24_volume_usd_desc&include=base_token,quote_token`);
     L.page++;
     const seen = new Set(L.pools.map(p => p.addr));
     L.pools.push(...geckoPools(j).filter(p => !seen.has(p.addr)));
@@ -396,8 +610,8 @@ async function searchPairs(q) {
   $('pairMsg').textContent = '検索中…';
   try {
     const j = ethers.isAddress(q)
-      ? await gecko(`/networks/${CHAIN.gecko}/tokens/${q.toLowerCase()}/pools?page=1`)
-      : await gecko(`/search/pools?query=${encodeURIComponent(q)}&network=${CHAIN.gecko}`);
+      ? await gecko(`/networks/${CHAIN.gecko}/tokens/${q.toLowerCase()}/pools?page=1&include=base_token,quote_token`)
+      : await gecko(`/search/pools?query=${encodeURIComponent(q)}&network=${CHAIN.gecko}&include=base_token,quote_token`);
     if ($('pairQ').value.trim() !== q) return; // 入力が変わっていたら捨てる
     L.search = geckoPools(j);
     $('pairMsg').textContent = `「${q}」の検索結果 ${L.search.length}件`;
@@ -416,16 +630,114 @@ function renderPairs() {
     list = [...list].sort((a, b) => b[key] - a[key]);
   }
   $('btnMore').style.display = (L.sort === 'fav' || L.search) ? 'none' : '';
-  if (!list.length) { $('pairList').innerHTML = `<div class="sub" style="padding:12px">${L.sort === 'fav' ? 'お気に入りはまだありません（☆で追加）' : '該当するペアがありません'}</div>`; return; }
+  if (!list.length) { $('pairList').innerHTML = `<div class="empty">${L.sort === 'fav' ? 'お気に入りはまだありません（☆で追加）' : '該当するペアがありません'}</div>`; return; }
   const sel = S.pool?.addr?.toLowerCase();
-  $('pairList').innerHTML = list.map(p => `<div class="prow ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}">
-      <div class="main"><b>${p.name}</b><div class="sub">${p.tvl == null ? 'お気に入り' : `流動性 ${usd(p.tvl)}・24h取引高 ${usd(p.vol)}`}</div></div>
-      ${p.tvl == null ? '' : `<span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(1)) + '%' : '-'}</span>`}
-      <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button>
-    </div>`).join('');
+  $('pairList').innerHTML = list.map(p => {
+    const title = p.name.replace(/\s*[\d.]+%\s*$/, ''), syms = title.split(' / ');
+    const feeTxt = (p.name.match(/([\d.]+%)\s*$/) || [])[1] || '';
+    return `<div class="pcard ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}">
+      <div class="top"><div class="avs">${av(syms[0] || '?', p.base || syms[0])}${av(syms[1] || '?', p.quote || syms[1])}</div>
+        <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料 ${feeTxt}</span>` : ''}
+          <div class="sub" style="margin-top:4px">${p.tvl == null ? 'お気に入り' : `流動性 ${usd(p.tvl)}・24h取引高 ${usd(p.vol)}`}</div></div>
+        <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
+      ${p.tvl == null ? '' : `<div class="bottom"><span>◆ 平均APR: <span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(2)) + '%' : '-'}</span></span><span class="sub">${p.addr.slice(0, 8)}…</span></div>`}
+    </div>`;
+  }).join('');
 }
 
-// ===== プール =====
+// ===== 手数料レベル（カード） =====
+// avail: { fee: { addr, tvl } | null }。null＝プールなし、undefined＝未確認
+function feeCards(selFee, avail) {
+  return FEE_LEVELS.map(f => {
+    const a = avail ? avail[f.fee] : undefined;
+    const info = a === undefined ? '' : a === null ? '<em class="sub">プールなし</em>' : `<em class="good">${a.tvl != null ? '流動性 ' + usd(a.tvl) : 'プールあり'}</em>`;
+    return `<button class="fee ${f.fee === selFee ? 'on' : ''} ${a === null ? 'none' : ''}" data-fee="${f.fee}" title="${f.ex}">
+      <b>${f.label}</b><span>${f.desc}</span>${info}</button>`;
+  }).join('');
+}
+async function feeAvail(a, b) {
+  const [t0, t1] = a.toLowerCase() < b.toLowerCase() ? [a, b] : [b, a];
+  const out = {};
+  await Promise.all(FEE_LEVELS.map(async f => {
+    const p = (await factoryR.getPool(t0, t1, f.fee)).toLowerCase();
+    if (p === ethers.ZeroAddress) { out[f.fee] = null; return; }
+    const known = [...L.pools, ...(L.search || [])].find(x => x.addr === p);
+    out[f.fee] = { addr: p, tvl: known ? known.tvl : null };
+  }));
+  return out;
+}
+
+// ===== ペアを作成（中央） =====
+const C = { a: null, b: null, fee: 3000, target: 'a', avail: null };
+function openCreate() {
+  $('pickBox').style.display = 'none'; $('createBox').style.display = '';
+  if (!C.a && S.pool) { C.a = S.pool.t0; C.b = S.pool.t1; C.fee = S.pool.fee; }
+  renderCreate();
+}
+function closeCreate() { $('createBox').style.display = 'none'; $('pickBox').style.display = ''; }
+async function renderCreate() {
+  const lab = t => t ? `<span style="display:flex;align-items:center;gap:8px">${av(showSym(t), t.addr)}<b>${showSym(t)}</b><span class="sub mono">${t.addr.slice(0, 8)}…</span></span>` : '<span>トークンを選択</span>';
+  $('cTokA').innerHTML = lab(C.a) + '<span>⌄</span>';
+  $('cTokB').innerHTML = lab(C.b) + '<span>⌄</span>';
+  $('cFees').innerHTML = feeCards(C.fee, C.avail);
+  $('cMsg').textContent = '';
+  if (C.a && C.b) {
+    if (C.a.addr === C.b.addr) { $('cMsg').innerHTML = '<span class="bad">同じトークンは選べません</span>'; return; }
+    $('cMsg').textContent = 'プールを確認中…';
+    C.avail = await feeAvail(C.a.addr, C.b.addr);
+    $('cFees').innerHTML = feeCards(C.fee, C.avail);
+    const a = C.avail[C.fee];
+    $('cMsg').innerHTML = a ? `<span class="good">このペア・手数料 ${C.fee / 10000}% のプールがあります。</span>`
+      : '<span class="warn">この手数料レベルのプールはまだありません。「プールあり」のカードを選んでください。</span>';
+  }
+}
+async function createGo() {
+  if (!C.a || !C.b) { $('cMsg').innerHTML = '<span class="bad">トークンAとトークンBを選んでください</span>'; return; }
+  if (!C.avail?.[C.fee]) { $('cMsg').innerHTML = '<span class="bad">この手数料レベルのプールがありません</span>'; return; }
+  await loadPool(C.a.addr, C.b.addr, C.fee);
+  if (!S.pool) return;
+  $('memo').value = $('cMemo').value;
+  closeCreate();
+  $('provide').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+// トークン選択の窓
+function openTokModal(target) {
+  C.target = target; $('tokQ').value = ''; $('tokModal').classList.add('open'); renderTokList(''); $('tokQ').focus();
+}
+function knownTokens() {
+  const count = {};
+  L.pools.forEach(p => [p.base, p.quote].forEach(a => { if (a) count[a] = (count[a] || 0) + 1; }));
+  return Object.entries(S.tokInfo).map(([addr, t]) => ({ addr, ...t, n: count[addr] || 0 })).sort((a, b) => b.n - a.n);
+}
+async function renderTokList(q) {
+  q = q.trim();
+  const all = knownTokens();
+  const top = all.slice(0, 5);
+  $('tokChips').innerHTML = top.map(t => `<button data-addr="${t.addr}">${av(t.symbol, t.addr)}${t.addr === WETH.toLowerCase() ? 'WETH（ETH）' : t.symbol}</button>`).join('');
+  if (ethers.isAddress(q)) {
+    $('tokList').innerHTML = '<div class="sub" style="padding:10px">読み込み中…</div>';
+    try {
+      const t = await token(q);
+      $('tokList').innerHTML = `<div class="trow" data-addr="${t.addr}">${av(t.symbol, t.addr)}<div><div>${t.symbol}</div><div class="sub mono">${t.addr}</div></div></div>`;
+    } catch { $('tokList').innerHTML = '<div class="sub" style="padding:10px">このアドレスのトークンが見つかりません</div>'; }
+    return;
+  }
+  const ql = q.toLowerCase();
+  const list = all.filter(t => !q || t.symbol.toLowerCase().includes(ql) || t.name.toLowerCase().includes(ql)).slice(0, 80);
+  $('tokList').innerHTML = list.length ? list.map(t => `<div class="trow" data-addr="${t.addr}">${av(t.symbol, t.addr)}
+    <div><div>${t.name}</div><div class="sub">${t.symbol}${t.addr === WETH.toLowerCase() ? '（ETHで払うときもこれ）' : ''}</div></div></div>`).join('')
+    : '<div class="sub" style="padding:10px">見つかりません。トークンのアドレスを貼り付けてください。</div>';
+}
+async function pickToken(addr) {
+  try {
+    const t = await token(addr);
+    C[C.target] = t; C.avail = null;
+    $('tokModal').classList.remove('open');
+    renderCreate();
+  } catch (e) { log('トークンを読めません: ' + errMsg(e)); }
+}
+
+// ===== プール（右） =====
 // 一覧から選んだプール：中身はチェーンから読み、Uniswap v3 公式のプールか確かめる
 async function selectPoolAddr(addr) {
   $('poolMsg').textContent = '読み込み中…';
@@ -451,38 +763,78 @@ async function loadPool(a, b, fee, expectAddr) {
     S.invert = stable(t0) && !stable(t1); // ドル建てが単位側に来るように
     S.lastEdited = 0; $('amt0').value = ''; $('amt1').value = '';
     $('poolMsg').textContent = '';
-    $('pairName').textContent = `${t0.symbol} / ${t1.symbol}　${fee / 10000}%`;
-    $('btnFav').textContent = isFav(addr) ? '★' : '☆';
+    $('pairName').textContent = `${t0.symbol}/${t1.symbol} に流動性を提供`;
+    $('btnFav').textContent = isFav(addr) ? '★' : '☆'; $('btnFav').classList.toggle('on', isFav(addr));
     renderPairs();
-    $('poolInfo').style.display = ''; $('rangeBox').style.display = '';
-    $('lab0').textContent = $('slab0').textContent = t0.symbol; $('lab1').textContent = $('slab1').textContent = t1.symbol;
+    $('poolInfo').style.display = '';
+    $('lab0').innerHTML = av(t0.symbol, t0.addr) + t0.symbol; $('lab1').innerHTML = av(t1.symbol, t1.addr) + t1.symbol;
+    $('slab0').textContent = t0.symbol; $('slab1').textContent = t1.symbol;
     $('use0').value = $('use1').value = ''; $('swapInfo').textContent = ''; $('swapGoRow').style.display = 'none'; S.swapPlan = null;
     $('ethPayRow').style.display = (t0.isWeth || t1.isWeth) ? '' : 'none';
+    $('pctIn').value = '';
     renderPrice();
     setRangePct(20);
+    $('pFees').innerHTML = feeCards(fee, undefined);
+    feeAvail(t0.addr, t1.addr).then(avl => { if (S.pool?.addr === addr) { S.pool.avail = avl; $('pFees').innerHTML = feeCards(fee, avl); } });
+    loadPoolDetail();
     await refreshBalances();
+    if (S.account) loadPortfolio();
   } catch (e) { $('poolMsg').textContent = errMsg(e); }
+}
+async function loadPoolDetail() {
+  const P = S.pool; if (!P) return;
+  $('detailCard').style.display = '';
+  $('detailTitle').textContent = `${P.t0.symbol}/${P.t1.symbol} プールの詳細`;
+  $('poolSub').innerHTML = `プール <a href="${CHAIN.explorer}/address/${P.addr}" target="_blank" class="mono">${P.addr.slice(0, 10)}…</a>　手数料 ${P.fee / 10000}%　ティック間隔 ${P.spacing}`;
+  try {
+    const [r0, r1] = await Promise.all([P.t0, P.t1].map(t => new ethers.Contract(t.addr, ERC20_ABI, rpc).balanceOf(P.addr)));
+    let g = null;
+    try { g = (await gecko(`/networks/${CHAIN.gecko}/pools/${P.addr.toLowerCase()}?include=base_token,quote_token`)).data.attributes; } catch {}
+    if (S.pool !== P) return;
+    const a0 = toNum(r0, P.t0.decimals), a1 = toNum(r1, P.t1.decimals);
+    const p0 = priceOf(P.t0), p1 = priceOf(P.t1);
+    const tvl = g ? Number(g.reserve_in_usd) : (p0 != null && p1 != null ? a0 * p0 + a1 * p1 : NaN);
+    const vol = g ? Number(g.volume_usd?.h24) : NaN;
+    const apr = tvl > 0 && isFinite(vol) ? vol * (P.fee / 10000) / tvl * 365 : NaN;
+    $('poolDetail').innerHTML = `
+      <div>流動性合計</div><div>${usd(tvl)}</div>
+      <div>24h取引高</div><div>${usd(vol)}</div>
+      <div>平均APR（推定）</div><div class="apr">${isFinite(apr) ? apr.toFixed(2) + '%' : '-'}</div>
+      <div>${P.t0.symbol}</div><div>${fmt(a0)}　<span class="sub">${p0 != null ? usd(a0 * p0) : ''}</span></div>
+      <div>${P.t1.symbol}</div><div>${fmt(a1)}　<span class="sub">${p1 != null ? usd(a1 * p1) : ''}</span></div>`;
+    renderUsd();
+  } catch (e) { $('poolDetail').innerHTML = `<div>読み込みエラー</div><div>${errMsg(e)}</div>`; }
 }
 // 人が見る価格（1 t0 = ? t1）
 function humanPrice(rawP, pool = S.pool) { return rawP * Math.pow(10, pool.t0.decimals - pool.t1.decimals); }
 function rawFromHuman(h, pool = S.pool) { return h / Math.pow(10, pool.t0.decimals - pool.t1.decimals); }
 const disp = h => S.invert ? 1 / h : h;
+const curDisp = () => disp(humanPrice(S.pool.sqrtP ** 2));
 function renderPrice() {
-  const P = S.pool, h = humanPrice(P.sqrtP ** 2);
-  const [base, quote] = S.invert ? [P.t1, P.t0] : [P.t0, P.t1];
-  $('priceTxt').textContent = `1 ${base.symbol} = ${fmt(disp(h))} ${quote.symbol}`;
-  $('poolSub').textContent = `プール ${P.addr.slice(0, 10)}…　手数料 ${P.fee / 10000}%　ティック間隔 ${P.spacing}`;
-  document.querySelectorAll('.unitTxt').forEach(el => el.textContent = `${quote.symbol} / ${base.symbol}`);
-}
-function setRangePct(pct) {
   const P = S.pool;
-  if (pct === 'full') { S.full = true; $('minP').value = ''; $('maxP').value = ''; updateRange(); return; }
+  const [base, quote] = S.invert ? [P.t1, P.t0] : [P.t0, P.t1];
+  $('priceTxt').textContent = `今の価格：1 ${base.symbol} = ${fmt(curDisp())} ${quote.symbol}`;
+  $('unitTxt').textContent = `価格の単位：${quote.symbol} / ${base.symbol}（1 ${base.symbol} あたり）`;
+}
+// ===== レンジ幅（最大・最小：価格⇔レート%） =====
+const rnd = x => Number(x.toPrecision(6));
+function setRates(up, down) {
   S.full = false;
-  const cur = disp(humanPrice(P.sqrtP ** 2));
-  $('minP').value = Number((cur * (1 - pct / 100)).toPrecision(6));
-  $('maxP').value = Number((cur * (1 + pct / 100)).toPrecision(6));
+  const c = curDisp();
+  $('maxP').value = rnd(c * (1 + up / 100)); $('maxR').value = rnd(up);
+  $('minP').value = rnd(c * (1 - down / 100)); $('minR').value = rnd(down);
   updateRange();
 }
+function setRangePct(pct) {
+  if (pct === 'full') {
+    S.full = true; ['maxP', 'maxR', 'minP', 'minR'].forEach(id => $(id).value = ''); updateRange(); return;
+  }
+  setRates(pct, pct);
+}
+function onMaxR() { const v = Number($('maxR').value); if ($('maxR').value !== '' && v > -100) { S.full = false; $('maxP').value = rnd(curDisp() * (1 + v / 100)); updateRange(); } }
+function onMinR() { const v = Number($('minR').value); if ($('minR').value !== '' && v < 100) { S.full = false; $('minP').value = rnd(curDisp() * (1 - v / 100)); updateRange(); } }
+function onMaxP() { const p = Number($('maxP').value); S.full = false; if (p > 0) $('maxR').value = rnd((p / curDisp() - 1) * 100); updateRange(); }
+function onMinP() { const p = Number($('minP').value); S.full = false; if (p > 0) $('minR').value = rnd((1 - p / curDisp()) * 100); updateRange(); }
 function getTicks() {
   const P = S.pool, sp = P.spacing;
   const lo = Math.ceil(MIN_TICK / sp) * sp, hi = Math.floor(MAX_TICK / sp) * sp;
@@ -498,35 +850,47 @@ function getTicks() {
 }
 function updateRange() {
   const T = getTicks();
-  if (!T) { $('rangeInfo').innerHTML = '<span class="bad">下限 &lt; 上限 で入力してください</span>'; return; }
+  if (!T) { $('rangeInfo').innerHTML = '<span class="bad">最小 &lt; 最大 になるように入れてください</span>'; $('ratioTxt').textContent = ''; return; }
   const P = S.pool, [tl, tu] = T;
   const pl = disp(humanPrice(tickToRaw(tl))), pu = disp(humanPrice(tickToRaw(tu)));
   const [mn, mx] = pl < pu ? [pl, pu] : [pu, pl];
   let st = '';
-  if (P.tick < tl || P.tick >= tu) st = '<span class="warn">今の価格はレンジ外です（片方のトークンだけ入ります・手数料は入りません）</span>';
-  $('rangeInfo').innerHTML = S.full ? 'フルレンジ（全価格帯）' :
-    `実際のレンジ：${fmt(mn)} 〜 ${fmt(mx)}（ティック ${tl} 〜 ${tu}）<br>${st}`;
+  if (P.tick < tl || P.tick >= tu) st = '<br><span class="warn">今の価格はレンジ外です（片方のトークンだけ入ります・手数料は入りません）</span>';
+  $('rangeInfo').innerHTML = S.full ? 'フルレンジ（全価格帯）' : `実際に使われるレンジ：${fmt(mn)} 〜 ${fmt(mx)}${st}`;
   const sqrtP = P.sqrtP;
   $('amt0').disabled = sqrtP >= sqrtAt(tu);
   $('amt1').disabled = sqrtP <= sqrtAt(tl);
   if ($('amt0').disabled) $('amt0').value = '';
   if ($('amt1').disabled) $('amt1').value = '';
+  renderRatio(T);
   syncAmounts(S.lastEdited ?? 0);
+}
+// このレンジで入れるときの、トークンの割合（価値ベース）
+function renderRatio(T) {
+  const P = S.pool, [tl, tu] = T, sp = P.sqrtP, sa = sqrtAt(tl), sb = sqrtAt(tu), price = sp * sp;
+  let s0;
+  if (sp <= sa) s0 = 1; else if (sp >= sb) s0 = 0;
+  else { const R = (sp - sa) * sp * sb / (sb - sp); s0 = 1 / (1 + R / price); }
+  $('ratioTxt').innerHTML = `${P.t0.symbol}: <span class="good">${(s0 * 100).toFixed(2)}%</span> / ${P.t1.symbol}: <span class="good">${((1 - s0) * 100).toFixed(2)}%</span>`;
 }
 // 片方を入れたらもう片方を計算
 function syncAmounts(i) {
   const T = getTicks(); if (!T) return;
   const P = S.pool, [tl, tu] = T, sqrtP = P.sqrtP, sa = sqrtAt(tl), sb = sqrtAt(tu);
-  if (sqrtP <= sa || sqrtP >= sb) return;
-  const k = 10 ** (P.t0.decimals - P.t1.decimals); // 生 → 人の単位の換算
-  const ratio = (sqrtP - sa) * sqrtP * sb / (sb - sqrtP); // amount1raw / amount0raw
-  if (i === 0) {
-    const v = Number($('amt0').value);
-    $('amt1').value = v > 0 ? Number((v * ratio * k).toPrecision(10)) : '';
-  } else {
-    const v = Number($('amt1').value);
-    $('amt0').value = v > 0 ? Number((v / ratio / k).toPrecision(10)) : '';
+  if (sqrtP > sa && sqrtP < sb) {
+    const k = 10 ** (P.t0.decimals - P.t1.decimals); // 生 → 人の単位の換算
+    const ratio = (sqrtP - sa) * sqrtP * sb / (sb - sqrtP); // amount1raw / amount0raw
+    if (i === 0) { const v = Number($('amt0').value); $('amt1').value = v > 0 ? Number((v * ratio * k).toPrecision(10)) : ''; }
+    else { const v = Number($('amt1').value); $('amt0').value = v > 0 ? Number((v / ratio / k).toPrecision(10)) : ''; }
   }
+  renderUsd();
+}
+function renderUsd() {
+  if (!S.pool) return;
+  const v = i => { const t = i ? S.pool.t1 : S.pool.t0, p = priceOf(t), a = Number($('amt' + i).value) || 0; return p != null ? a * p : null; };
+  const u0 = v(0), u1 = v(1);
+  $('usd0').textContent = u0 != null ? usd(u0) : '$-'; $('usd1').textContent = u1 != null ? usd(u1) : '$-';
+  $('usdTotal').textContent = u0 != null && u1 != null ? usd(u0 + u1) : '-';
 }
 async function refreshBalances() {
   if (!S.account || !S.pool) return;
@@ -539,8 +903,8 @@ async function refreshBalances() {
   };
   const [b0, b1] = await Promise.all([bal(P.t0), bal(P.t1)]);
   S.bal = [b0, b1];
-  const show = (t, b) => `残高 ${fmt(toNum(b.erc, t.decimals))}` + (t.isWeth ? `（ETH ${fmt(toNum(b.eth, 18))}）` : '');
-  $('bal0').textContent = show(P.t0, b0); $('bal1').textContent = show(P.t1, b1);
+  const show = i => { const t = i ? P.t1 : P.t0; return `使用可能: ${fmt(toNum(spendable(i), t.decimals))} ${usesEth(t) ? 'ETH' : t.symbol}`; };
+  $('bal0').textContent = show(0); $('bal1').textContent = show(1);
 }
 // ===== 比率をそろえる（スワップ） =====
 const GAS_RESERVE = 10n ** 15n; // ガス代として 0.001 ETH 残す
@@ -610,7 +974,7 @@ async function doSwap() {
     const n0 = X.from === 0 ? X.u0 - X.amountIn : X.u0 + minOut;
     const n1 = X.from === 0 ? X.u1 + minOut : X.u1 - X.amountIn;
     S.swapPlan = null; $('swapGoRow').style.display = 'none';
-    $('swapInfo').textContent = '交換しました。下の「流動性を追加」で追加できます。';
+    $('swapInfo').textContent = '交換しました。下の「流動性を提供」で追加できます。';
     await refreshBalances();
     fillAfterSwap(n0, n1);
     return true;
@@ -628,12 +992,12 @@ function fillAfterSwap(n0, n1) {
     S.lastEdited = 1; syncAmounts(1);
   }
 }
-
-function maxAmount(i) {
-  if (!S.bal) return;
-  const t = i === 0 ? S.pool.t0 : S.pool.t1, b = S.bal[i];
-  let v = b.erc;
-  if (t.isWeth && $('payEth').checked) v = b.eth > 10n ** 15n ? b.eth - 10n ** 15n : 0n; // ガス代分 0.001ETH 残す
+// 25/50/75/100% ボタン：使用可能な残高の割合を入れる
+function fracAmount(i, frac) {
+  if (!S.bal) { log('先にメタマスクに接続してください'); return; }
+  if ($('amt' + i).disabled) return;
+  const t = i === 0 ? S.pool.t0 : S.pool.t1;
+  const v = spendable(i) * BigInt(Math.round(frac * 10000)) / 10000n;
   $('amt' + i).value = ethers.formatUnits(v, t.decimals);
   S.lastEdited = i; syncAmounts(i);
 }
@@ -658,17 +1022,21 @@ function ethPlan(P, a0, a1, payEth) {
   return { value: 0n, wethSide: -1 };
 }
 
+// ===== メモ（ポジションごと・このブラウザに保存） =====
+const memos = () => store.get('nba.memo.' + CHAIN_KEY, {});
+function setMemo(id, text) { const m = memos(); if (text) m[String(id)] = clean(text).slice(0, 15); else delete m[String(id)]; store.set('nba.memo.' + CHAIN_KEY, m); }
+
 // ===== レンジを作り直す（閉じる → 比率をそろえる → 新しいレンジで追加） =====
 async function startRebuild(pos) {
+  showView('pair');
   await loadPool(pos.t0.addr, pos.t1.addr, pos.fee);
   if (!S.pool) return;
   // 前と同じ幅のまま、今の価格を真ん中にしたレンジを入れておく
   const w = Math.sqrt(tickToRaw(pos.tu - pos.tl));
-  const cur = disp(humanPrice(S.pool.sqrtP ** 2));
+  const c = curDisp();
   S.full = false;
-  $('minP').value = Number((cur / w).toPrecision(6));
-  $('maxP').value = Number((cur * w).toPrecision(6));
-  updateRange();
+  $('maxP').value = rnd(c * w); $('minP').value = rnd(c / w); onMaxP(); onMinP();
+  $('memo').value = memos()[String(pos.id)] || '';
   S.rebuild = pos;
   $('rebuildTxt').textContent = `#${pos.id} を閉じて、下のレンジ（前と同じ幅・今の価格が真ん中）で作り直します。レンジを確かめて、必要なら変えてから「作り直す」を押してください。メタマスクの承認は3〜5回出ます。`;
   $('rebuildStep').textContent = '';
@@ -698,7 +1066,7 @@ async function runRebuild() {
       return d > 0n ? d : 0n;
     };
     const g0 = got(0), g1 = got(1);
-    if (g0 === 0n && g1 === 0n) throw new Error('閉じた結果の受け取りが確認できません。右の一覧と残高を確かめてください');
+    if (g0 === 0n && g1 === 0n) throw new Error('閉じた結果の受け取りが確認できません。「私の流動性」と残高を確かめてください');
     $('use0').value = ethers.formatUnits(g0, S.pool.t0.decimals);
     $('use1').value = ethers.formatUnits(g1, S.pool.t1.decimals);
     step('2/3 比率をそろえています…');
@@ -731,8 +1099,15 @@ async function mint() {
     const npm = new ethers.Contract(NPM, NPM_ABI, S.signer);
     const calls = [npmIface.encodeFunctionData('mint', [params])];
     if (ep.value > 0n) calls.push(npmIface.encodeFunctionData('refundETH', []));
-    await sendTx('新規ポジション作成', npm.multicall(calls, { value: ep.value }));
+    const r = await sendTx('新規ポジション作成', npm.multicall(calls, { value: ep.value }));
+    // 新しいポジション番号を取り出してメモを付ける
+    for (const lg of r.logs) {
+      if (lg.address.toLowerCase() !== NPM.toLowerCase()) continue;
+      try { const ev = npmIface.parseLog(lg); if (ev?.name === 'IncreaseLiquidity') { setMemo(ev.args.tokenId, $('memo').value.trim()); log(`ポジション #${ev.args.tokenId} を作りました`); break; } } catch {}
+    }
+    $('memo').value = '';
     await Promise.all([refreshBalances(), loadPositions()]);
+    loadPortfolio();
     return true;
   } catch (e) { log('作成エラー: ' + errMsg(e)); return false; }
   finally { btn.disabled = false; }
@@ -744,7 +1119,7 @@ async function readPosition(id) {
   const [t0, t1] = await Promise.all([token(p.token0), token(p.token1)]);
   const poolAddr = await factoryR.getPool(p.token0, p.token1, p.fee);
   const s0 = await new ethers.Contract(poolAddr, POOL_ABI, rpc).slot0();
-  const pos = { id: BigInt(id), t0, t1, fee: Number(p.fee), tl: Number(p.tickLower), tu: Number(p.tickUpper),
+  const pos = { id: BigInt(id), t0, t1, fee: Number(p.fee), tl: Number(p.tickLower), tu: Number(p.tickUpper), pool: poolAddr,
     L: p.liquidity, sqrtP: Number(s0.sqrtPriceX96) / 2 ** 96, tick: Number(s0.tick), owed: [p.tokensOwed0, p.tokensOwed1] };
   const [r0, r1] = amountsFromL(Number(pos.L), pos.sqrtP, pos.tl, pos.tu);
   pos.amt = [r0, r1];
@@ -757,24 +1132,42 @@ async function readPosition(id) {
   } catch { pos.fees = pos.owed; }
   return pos;
 }
+function posValues(pos) {
+  const a0 = pos.amt[0] / 10 ** pos.t0.decimals, a1 = pos.amt[1] / 10 ** pos.t1.decimals;
+  const f0 = toNum(pos.fees[0], pos.t0.decimals), f1 = toNum(pos.fees[1], pos.t1.decimals);
+  const p0 = priceOf(pos.t0), p1 = priceOf(pos.t1), ok = p0 != null && p1 != null;
+  return { a0, a1, f0, f1, val: ok ? a0 * p0 + a1 * p1 : null, fval: ok ? f0 * p0 + f1 * p1 : null };
+}
 function posHTML(pos, mine) {
   const pool = { t0: pos.t0, t1: pos.t1 };
   const inRange = pos.tick >= pos.tl && pos.tick < pos.tu;
   const closed = pos.L === 0n;
-  const pl = humanPrice(tickToRaw(pos.tl), pool), pu = humanPrice(tickToRaw(pos.tu), pool), pc = humanPrice(pos.sqrtP ** 2, pool);
-  const a0 = pos.amt[0] / 10 ** pos.t0.decimals, a1 = pos.amt[1] / 10 ** pos.t1.decimals;
-  const f0 = toNum(pos.fees[0], pos.t0.decimals), f1 = toNum(pos.fees[1], pos.t1.decimals);
-  const val = a0 + a1 / pc, fval = f0 + f1 / pc;
+  const inv = /^(USDG|USDC|USDT|DAI|USDe|PYUSD)$/i.test(pos.t0.symbol) && !/^(USDG|USDC|USDT|DAI|USDe|PYUSD)$/i.test(pos.t1.symbol);
+  const show = h => inv ? 1 / h : h;
+  const [pl, pu] = [show(humanPrice(tickToRaw(pos.tl), pool)), show(humanPrice(tickToRaw(pos.tu), pool))].sort((x, y) => x - y);
+  const pc = show(humanPrice(pos.sqrtP ** 2, pool));
+  const unit = inv ? `${pos.t0.symbol}/${pos.t1.symbol}` : `${pos.t1.symbol}/${pos.t0.symbol}`;
+  const v = posValues(pos);
+  const memo = memos()[String(pos.id)];
   const chip = closed ? '<span class="chip">閉じています</span>' : inRange ? '<span class="chip on">レンジ内</span>' : '<span class="chip off">レンジ外</span>';
+  // レンジのバー：表示範囲はレンジの外側に余白をとる。今の価格の位置に縦線
+  const lo = Math.log(pl), hi = Math.log(pu), padL = (hi - lo) * 0.35;
+  const x = val => Math.min(100, Math.max(0, (Math.log(val) - (lo - padL)) / ((hi - lo) + 2 * padL) * 100));
+  const bar = `<div class="bar"><div class="in" style="left:${x(pl)}%;right:${100 - x(pu)}%"></div>
+    <div class="now" style="left:${x(pc)}%;background:${inRange ? 'var(--text)' : 'var(--bad)'}"></div>
+    <span class="nowLbl ${inRange ? '' : 'bad'}" style="left:${x(pc)}%">今 ${fmt(pc)}</span>
+    <span class="lbl" style="left:${x(pl)}%">${fmt(pl)}</span><span class="lbl" style="left:${x(pu)}%">${fmt(pu)}</span></div>`;
   return `<div class="pos" data-id="${pos.id}">
-    <div class="head"><b>#${pos.id}</b><span>${pos.t0.symbol} / ${pos.t1.symbol}</span><span class="chip">${pos.fee / 10000}%</span>${chip}
-      <a class="sub" href="https://app.uniswap.org/positions/v3/${CHAIN.uni}/${pos.id}" target="_blank">Uniswapで見る</a></div>
+    <div class="head"><div class="avs">${av(pos.t0.symbol, pos.t0.addr)}${av(pos.t1.symbol, pos.t1.addr)}</div>
+      <div style="flex:1;min-width:0"><b>${pos.t0.symbol}/${pos.t1.symbol}</b> <span class="chip">手数料 ${pos.fee / 10000}%</span>
+        <div class="sub">#${pos.id}${memo ? '　メモ：' + memo : ''}</div></div>${chip}</div>
+    ${closed ? '' : bar}
     <div class="kv">
-      <div>レンジ</div><div>${fmt(pl)} 〜 ${fmt(pu)} ${pos.t1.symbol}/${pos.t0.symbol}（今 ${fmt(pc)}）</div>
-      <div>入っている量</div><div>${fmt(a0)} ${pos.t0.symbol} ＋ ${fmt(a1)} ${pos.t1.symbol}</div>
-      <div>評価額</div><div>約 ${fmt(val)} ${pos.t0.symbol} 相当</div>
-      <div>未回収の手数料</div><div><b>${fmt(f0)} ${pos.t0.symbol} ＋ ${fmt(f1)} ${pos.t1.symbol}</b>（約 ${fmt(fval)} ${pos.t0.symbol}）</div>
-      ${mine ? '' : `<div>持ち主</div><div class="sub">${pos.owner || '-'}</div>`}
+      <div>レンジ（${unit}）</div><div>${fmt(pl)} 〜 ${fmt(pu)}</div>
+      <div>入っている量</div><div>${fmt(v.a0)} ${pos.t0.symbol}<br>${fmt(v.a1)} ${pos.t1.symbol}</div>
+      <div>評価額</div><div><b>${v.val != null ? usd(v.val) : '-'}</b></div>
+      <div>未回収の手数料</div><div><b class="good">${v.fval != null ? usd(v.fval) : ''}</b><br><span class="sub">${fmt(v.f0)} ${pos.t0.symbol} ＋ ${fmt(v.f1)} ${pos.t1.symbol}</span></div>
+      ${mine ? '' : `<div>持ち主</div><div class="sub mono">${pos.owner ? pos.owner.slice(0, 10) + '…' : '-'}</div>`}
     </div>
     ${mine ? `<div class="acts">
       <button data-act="collect">手数料を回収</button>
@@ -782,20 +1175,30 @@ function posHTML(pos, mine) {
       <button data-act="remove" ${closed ? 'disabled' : ''}>一部を引き出す</button>
       <button data-act="rebuild" ${closed ? 'disabled' : ''}>レンジを作り直す</button>
       <button data-act="close" class="danger" ${closed ? 'disabled' : ''}>閉じて全額回収</button>
-    </div><div class="panelBox"></div>` : ''}
+      <button data-act="memo">メモ</button>
+      <a class="sub" style="align-self:center" href="https://app.uniswap.org/positions/v3/${CHAIN.uni}/${pos.id}" target="_blank">Uniswapで見る</a>
+    </div><div class="panelBox"></div>` : `<div class="sub" style="margin-top:8px"><a href="https://app.uniswap.org/positions/v3/${CHAIN.uni}/${pos.id}" target="_blank">Uniswapで見る</a></div>`}
   </div>`;
 }
 async function loadPositions() {
   if (!S.account) return;
-  $('posList').textContent = '読み込み中…';
+  $('posList').innerHTML = '<div class="empty">読み込み中…</div>';
   try {
     const n = Number(await npmR.balanceOf(S.account));
     const ids = await Promise.all([...Array(n).keys()].map(i => npmR.tokenOfOwnerByIndex(S.account, i)));
     const all = await Promise.all(ids.map(readPosition));
     S.positions = Object.fromEntries(all.map(p => [String(p.id), p]));
+    await ensurePrices(all.flatMap(p => [p.t0.addr, p.t1.addr]));
     const list = all.filter(p => $('showClosed').checked || p.L > 0n || p.fees[0] > 0n || p.fees[1] > 0n).sort((a, b) => Number(b.id - a.id));
-    $('posList').innerHTML = list.length ? list.map(p => posHTML(p, true)).join('') : 'このウォレットのポジションはまだありません。';
-  } catch (e) { $('posList').textContent = '読み込みエラー: ' + errMsg(e); }
+    const open = all.filter(p => p.L > 0n), vals = open.map(posValues);
+    const sum = k => vals.reduce((s, v) => s + (v[k] || 0), 0);
+    const outN = open.filter(p => !(p.tick >= p.tl && p.tick < p.tu)).length;
+    $('posStats').innerHTML = `<div class="stat"><div class="sub">提供中の評価額</div><div class="v">${usd(sum('val'))}</div></div>
+      <div class="stat"><div class="sub">未回収の手数料</div><div class="v good">${usd(sum('fval'))}</div></div>
+      <div class="stat"><div class="sub">ポジション</div><div class="v">${open.length}件 ${outN ? `<span class="bad" style="font-size:13px">レンジ外 ${outN}件</span>` : ''}</div></div>`;
+    $('navPos').textContent = open.length ? `私の流動性（${open.length}）` : '私の流動性';
+    $('posList').innerHTML = list.length ? `<div class="posGrid">${list.map(p => posHTML(p, true)).join('')}</div>` : '<div class="empty">このウォレットのポジションはまだありません。</div>';
+  } catch (e) { $('posList').innerHTML = `<div class="empty">読み込みエラー：${errMsg(e)}</div>`; }
 }
 
 // 受け取り：WETHをETHに戻す場合は collect先をNPMにして unwrap＋sweep
@@ -831,7 +1234,7 @@ async function doIncrease(pos, in0, in1) {
   const [a0, a1] = desiredAmounts(pool, in0, in1);
   if (a0 === 0n && a1 === 0n) throw new Error('額を入力してください');
   const slip = Number($('slip').value);
-  const ep = ethPlan(pool, a0, a1, $('payEth').checked);
+  const ep = ethPlan(pool, a0, a1, $('recvEth').checked);
   if (ep.wethSide !== 0) await ensureAllowance(pos.t0, a0);
   if (ep.wethSide !== 1) await ensureAllowance(pos.t1, a1);
   const calls = [npmIface.encodeFunctionData('increaseLiquidity', [{ tokenId: pos.id, amount0Desired: a0, amount1Desired: a1,
@@ -843,7 +1246,7 @@ async function doIncrease(pos, in0, in1) {
 function openPanel(card, pos, act) {
   const box = card.querySelector('.panelBox');
   if (act === 'remove') {
-    box.innerHTML = `<div class="panel"><div class="row"><label>引き出す割合</label>
+    box.innerHTML = `<div class="panel"><div class="row"><span class="sub">引き出す割合</span>
       <select class="pct"><option>25</option><option selected>50</option><option>75</option><option>100</option></select>%
       <button class="primary go">引き出す（手数料も回収）</button><button class="cancel">やめる</button></div></div>`;
     box.querySelector('.go').onclick = () => run(card, () => doDecrease(pos, Number(box.querySelector('.pct').value)));
@@ -852,10 +1255,10 @@ function openPanel(card, pos, act) {
     const k = 10 ** (pos.t0.decimals - pos.t1.decimals);
     const ratio = (sp > sa && sp < sb) ? (sp - sa) * sp * sb / (sb - sp) : null;
     box.innerHTML = `<div class="panel">
-      <div class="row"><label>${pos.t0.symbol}</label><input class="i0" type="number" step="any" ${sp >= sb ? 'disabled' : ''}></div>
-      <div class="row"><label>${pos.t1.symbol}</label><input class="i1" type="number" step="any" ${sp <= sa ? 'disabled' : ''}></div>
-      <div class="sub">WETHのペアは、左の「ETHで支払う」の設定に従います。</div>
-      <div class="row"><button class="primary go">追加する</button><button class="cancel">やめる</button></div></div>`;
+      <div class="row"><span class="sub" style="min-width:60px">${pos.t0.symbol}</span><input class="i0" type="number" step="any" style="flex:1" ${sp >= sb ? 'disabled' : ''}></div>
+      <div class="row"><span class="sub" style="min-width:60px">${pos.t1.symbol}</span><input class="i1" type="number" step="any" style="flex:1" ${sp <= sa ? 'disabled' : ''}></div>
+      <div class="sub">WETHのペアは、右の「WETHはETHに戻して受け取る」がオンならETHで払います。</div>
+      <div class="row" style="margin-top:8px"><button class="primary go">追加する</button><button class="cancel">やめる</button></div></div>`;
     const i0 = box.querySelector('.i0'), i1 = box.querySelector('.i1');
     if (ratio) {
       i0.oninput = () => { const v = Number(i0.value); i1.value = v > 0 ? Number((v * ratio * k).toPrecision(10)) : ''; };
@@ -866,6 +1269,11 @@ function openPanel(card, pos, act) {
     box.innerHTML = `<div class="panel"><div class="row"><span>全額と手数料をウォレットに戻します。よろしいですか？</span>
       <button class="danger go">閉じる</button><button class="cancel">やめる</button></div></div>`;
     box.querySelector('.go').onclick = () => run(card, () => doDecrease(pos, 100));
+  } else if (act === 'memo') {
+    box.innerHTML = `<div class="panel"><div class="row"><input class="m" maxlength="15" style="flex:1" placeholder="最大15文字">
+      <button class="primary go">保存</button><button class="cancel">やめる</button></div></div>`;
+    box.querySelector('.m').value = memos()[String(pos.id)] || '';
+    box.querySelector('.go').onclick = () => { setMemo(pos.id, box.querySelector('.m').value.trim()); loadPositions(); };
   }
   box.querySelector('.cancel').onclick = () => box.innerHTML = '';
 }
@@ -873,6 +1281,7 @@ async function run(card, fn) {
   card.querySelectorAll('button').forEach(b => b.disabled = true);
   try { await fn(); } catch (e) { log('エラー: ' + errMsg(e)); }
   await Promise.all([loadPositions(), refreshBalances()]);
+  loadPortfolio();
 }
 
 // ===== イベント =====
@@ -882,9 +1291,11 @@ $('chainSel').onchange = () => {
   location.href = location.pathname + '?chain=' + $('chainSel').value;
 };
 $('btnConnect').onclick = connect;
-$('btnLoadPool').onclick = () => loadPool($('tokA').value.trim(), $('tokB').value.trim(), Number($('feeSel').value));
-document.querySelectorAll('#pickTabs .tab').forEach(b => b.onclick = () => {
-  document.querySelectorAll('#pickTabs .tab').forEach(x => x.classList.toggle('on', x === b));
+$('navPair').onclick = () => showView('pair');
+$('navPos').onclick = () => { showView('pos'); if (S.account) loadPositions(); };
+$('btnPfReload').onclick = loadPortfolio;
+document.querySelectorAll('#pickTabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#pickTabs button').forEach(x => x.classList.toggle('on', x === b));
   L.sort = b.dataset.sort; renderPairs();
 });
 let qTimer;
@@ -892,27 +1303,32 @@ $('pairQ').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => sea
 $('minTvl').onchange = renderPairs;
 $('btnMore').onclick = loadMorePairs;
 $('pairList').onclick = e => {
-  const row = e.target.closest('.prow'); if (!row) return;
+  const row = e.target.closest('.pcard'); if (!row) return;
   if (e.target.closest('[data-star]')) { toggleFav(row.dataset.addr, row.dataset.name); return; }
   selectPoolAddr(row.dataset.addr);
 };
-$('btnFav').onclick = () => S.pool && toggleFav(S.pool.addr, $('pairName').textContent);
+$('btnFav').onclick = () => S.pool && toggleFav(S.pool.addr, `${S.pool.t0.symbol} / ${S.pool.t1.symbol} ${S.pool.fee / 10000}%`);
 $('btnInvert').onclick = () => {
   S.invert = !S.invert;
   const a = Number($('minP').value), b = Number($('maxP').value);
-  if (a > 0 && b > 0) { $('minP').value = Number((1 / b).toPrecision(6)); $('maxP').value = Number((1 / a).toPrecision(6)); }
+  if (a > 0 && b > 0) { $('minP').value = rnd(1 / b); $('maxP').value = rnd(1 / a); onMinP(); onMaxP(); }
   renderPrice(); updateRange();
 };
 document.querySelectorAll('[data-pct]').forEach(b => b.onclick = () => { $('pctIn').value = ''; setRangePct(b.dataset.pct === 'full' ? 'full' : Number(b.dataset.pct)); });
 // 手入力の幅（±%）：打つたびに反映。0〜99% の範囲だけ受け付ける
-$('pctIn').oninput = () => {
-  const v = Number($('pctIn').value);
-  if (S.pool && v > 0 && v < 100) setRangePct(v);
+$('pctIn').oninput = () => { const v = Number($('pctIn').value); if (S.pool && v > 0 && v < 100) setRangePct(v); };
+$('maxP').oninput = onMaxP; $('minP').oninput = onMinP;
+$('maxR').oninput = onMaxR; $('minR').oninput = onMinR;
+$('pFees').onclick = e => {
+  const b = e.target.closest('[data-fee]'); if (!b || !S.pool) return;
+  const f = Number(b.dataset.fee), a = S.pool.avail?.[f];
+  if (f === S.pool.fee) return;
+  if (a === null) { log(`手数料 ${f / 10000}% のプールはまだありません`); return; }
+  loadPool(S.pool.t0.addr, S.pool.t1.addr, f);
 };
-$('minP').oninput = $('maxP').oninput = () => { S.full = false; updateRange(); };
 $('amt0').oninput = () => { S.lastEdited = 0; syncAmounts(0); };
 $('amt1').oninput = () => { S.lastEdited = 1; syncAmounts(1); };
-document.querySelectorAll('.maxBtn').forEach(b => b.onclick = () => maxAmount(Number(b.dataset.i)));
+document.querySelectorAll('.fracs').forEach(g => g.onclick = e => { const b = e.target.closest('[data-frac]'); if (b) fracAmount(Number(g.dataset.i), Number(b.dataset.frac)); });
 $('payEth').onchange = () => { refreshBalances(); };
 $('btnMint').onclick = mint;
 $('btnRebuild').onclick = runRebuild;
@@ -921,7 +1337,21 @@ $('btnUseBal').onclick = useBalances;
 $('btnQuote').onclick = quoteSwap;
 $('btnSwap').onclick = doSwap;
 $('use0').oninput = $('use1').oninput = () => { S.swapPlan = null; $('swapGoRow').style.display = 'none'; };
-$('btnReload').onclick = () => { loadPositions(); refreshBalances(); };
+// ペアを作成
+$('btnShowCreate').onclick = openCreate;
+$('btnCreateCancel').onclick = closeCreate;
+$('cTokA').onclick = () => openTokModal('a');
+$('cTokB').onclick = () => openTokModal('b');
+$('cFees').onclick = e => { const b = e.target.closest('[data-fee]'); if (!b) return; C.fee = Number(b.dataset.fee); renderCreate(); };
+$('btnCreate').onclick = createGo;
+$('tokClose').onclick = () => $('tokModal').classList.remove('open');
+$('tokModal').onclick = e => { if (e.target === $('tokModal')) $('tokModal').classList.remove('open'); };
+let tTimer;
+$('tokQ').oninput = () => { clearTimeout(tTimer); tTimer = setTimeout(() => renderTokList($('tokQ').value), 300); };
+$('tokChips').onclick = e => { const b = e.target.closest('[data-addr]'); if (b) pickToken(b.dataset.addr); };
+$('tokList').onclick = e => { const r = e.target.closest('[data-addr]'); if (r) pickToken(r.dataset.addr); };
+// 私の流動性
+$('btnReload').onclick = () => { loadPositions(); refreshBalances(); loadPortfolio(); };
 $('showClosed').onchange = loadPositions;
 $('posList').onclick = e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
@@ -933,7 +1363,7 @@ $('posList').onclick = e => {
 $('btnLook').onclick = async () => {
   const id = $('lookId').value.trim(); if (!id) return;
   $('lookBox').innerHTML = '<div class="sub">読み込み中…</div>';
-  try { $('lookBox').innerHTML = posHTML(await readPosition(id), false); }
+  try { const p = await readPosition(id); await ensurePrices([p.t0.addr, p.t1.addr]); $('lookBox').innerHTML = posHTML(p, false); }
   catch (e) { $('lookBox').innerHTML = `<div class="bad">${errMsg(e)}</div>`; }
 };
 if (window.ethereum) {
