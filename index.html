@@ -202,6 +202,7 @@ details.box summary{cursor:pointer;font-weight:600}
             <div class="row" style="margin-bottom:2px"><span id="ratioTxt"></span></div>
             <div class="row"><span class="sub" id="priceTxt"></span><button class="link" id="btnInvert" title="価格の向きを入れ替え">⇄</button></div>
 
+            <div id="poolWarn" class="box" style="display:none;border:1px solid var(--warn)"></div>
             <div id="rebuildBox" class="box" style="display:none;border:1px solid var(--warn)">
               <b>レンジの作り直し</b>
               <div id="rebuildTxt" class="sub" style="margin:6px 0"></div>
@@ -314,6 +315,7 @@ const CHAINS = {
     weth: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73',
     gecko: 'robinhood', geckoDex: 'uniswap-v3-robinhood', uni: 'robinhood',
     favs: [{ addr: '0xd29893ffac8b29ec4db2cfe0cdb3fe1377c028ff', name: 'Index / WETH 1%' }],
+    known: { WETH: ['0x0bd7d308f8e1639fab988df18a8011f41eacad73'], USDG: ['0x5fc5360d0400a0fd4f2af552add042d716f1d168'] },
   },
   arbitrum: {
     id: 42161, hex: '0xa4b1', name: 'Arbitrum One',
@@ -323,6 +325,13 @@ const CHAINS = {
     weth: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
     gecko: 'arbitrum', geckoDex: 'uniswap_v3_arbitrum', uni: 'arbitrum',
     favs: [{ addr: '0xc6962004f452be9203591991d15f6b388e09e8d0', name: 'WETH / USDC 0.05%' }],
+    known: {
+      WETH: ['0x82af49447d8a07e3bd95bd0d56f35241523fbab1'],
+      USDC: ['0xaf88d065e77c8cc2239327c5edb3a432268e5831', '0xff970a61a04b1ca14834a43f5de4533ebddb5cc8'],
+      'USD₮0': ['0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'], USDT: ['0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9'],
+      WBTC: ['0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f'], ARB: ['0x912ce59144191c1204e64559fe8253a0e49e6548'],
+      DAI: ['0xda10009cbd5d07dd0cecc66161fc93d7c9000da1'],
+    },
   },
 };
 // 使うチェーン：URLの ?chain= ＞ 前回の選択 ＞ Robinhood
@@ -549,6 +558,45 @@ async function ensurePrices(addrs) {
   } catch {}
 }
 
+// ===== 偽物・小さいプールの注意 =====
+const LOW_TVL = 10000; // これより小さい流動性（ドル）は注意を出す
+// 一覧に出ているプールから、トークンごとの流動性の合計と、同じ名前のトークンを集める
+function tokenStats() {
+  const tvl = {}, bySym = {};
+  [...L.pools, ...(L.search || [])].forEach(p => [p.base, p.quote].forEach(a => { if (a) tvl[a] = (tvl[a] || 0) + p.tvl; }));
+  Object.entries(S.tokInfo).forEach(([a, t]) => { const k = t.symbol.toUpperCase(); (bySym[k] = bySym[k] || []).push(a); });
+  return { tvl, bySym };
+}
+function tokenWarn(addr, sym) {
+  if (!addr) return '';
+  addr = addr.toLowerCase(); const k = String(sym || S.tokInfo[addr]?.symbol || '').toUpperCase();
+  const known = CHAIN.known[k];
+  if (known) return known.includes(addr) ? '' : `本物の ${k} とアドレスが違います（偽物の可能性）`;
+  if (Object.values(CHAIN.known).flat().includes(addr)) return '';
+  if (k === 'ETH') return '「ETH」という名前のトークンは偽物の可能性があります（本物のETHはトークンではありません）';
+  if (/[^\x20-\x7E]/.test(k)) return '名前に見慣れない文字が入っています（本物に似せた偽物の可能性）';
+  const { tvl, bySym } = tokenStats(), same = bySym[k] || [];
+  if (same.length > 1) {
+    const top = same.reduce((a, b) => (tvl[b] || 0) > (tvl[a] || 0) ? b : a);
+    if (top !== addr) return `同じ名前「${k}」のトークンが他にもあります（流動性が一番大きいのは ${top.slice(0, 8)}…）`;
+  }
+  return '';
+}
+function renderPoolWarn(tvl) {
+  const P = S.pool; if (!P) return;
+  const w = [P.t0, P.t1].map(t => tokenWarn(t.addr, t.symbol) && `${t.symbol}（${t.addr.slice(0, 8)}…）：${tokenWarn(t.addr, t.symbol)}`).filter(Boolean);
+  if (tvl === undefined) tvl = P.tvl;
+  if (tvl != null && isFinite(tvl) && tvl < LOW_TVL) w.push(`流動性が小さいプールです（${usd(tvl)}）。価格が急に動きやすく、交換の目減りも大きくなります。`);
+  if (tvl === null) w.push('このプールの流動性の情報が取れませんでした。');
+  S.warns = w;
+  if (!w.length) { $('poolWarn').style.display = 'none'; S.warnAck = true; return; }
+  S.warnAck = false;
+  $('poolWarn').style.display = '';
+  $('poolWarn').innerHTML = `<b class="warn">⚠ 注意</b><ul style="margin:6px 0 8px;padding-left:18px">${w.map(x => `<li class="sub" style="color:var(--text)">${x}</li>`).join('')}</ul>
+    <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="warnAck"> 内容を確認したうえで進める</label>`;
+  $('warnAck').onchange = () => { S.warnAck = $('warnAck').checked; };
+}
+
 // ===== ポートフォリオ（左） =====
 async function loadPortfolio() {
   if (!S.account) return;
@@ -635,9 +683,10 @@ function renderPairs() {
   $('pairList').innerHTML = list.map(p => {
     const title = p.name.replace(/\s*[\d.]+%\s*$/, ''), syms = title.split(' / ');
     const feeTxt = (p.name.match(/([\d.]+%)\s*$/) || [])[1] || '';
+    const warn = [tokenWarn(p.base, syms[0]), tokenWarn(p.quote, syms[1])].filter(Boolean).join(' ／ ') || (p.tvl != null && p.tvl < LOW_TVL ? '流動性が小さいプールです' : '');
     return `<div class="pcard ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}">
       <div class="top"><div class="avs">${av(syms[0] || '?', p.base || syms[0])}${av(syms[1] || '?', p.quote || syms[1])}</div>
-        <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料 ${feeTxt}</span>` : ''}
+        <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料 ${feeTxt}</span>` : ''} ${warn ? `<span class="chip off" title="${warn}">⚠ 要確認</span>` : ''}
           <div class="sub" style="margin-top:4px">${p.tvl == null ? 'お気に入り' : `流動性 ${usd(p.tvl)}・24h取引高 ${usd(p.vol)}`}</div></div>
         <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
       ${p.tvl == null ? '' : `<div class="bottom"><span>◆ 平均APR: <span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(2)) + '%' : '-'}</span></span><span class="sub">${p.addr.slice(0, 8)}…</span></div>`}
@@ -680,15 +729,16 @@ async function renderCreate() {
   $('cTokA').innerHTML = lab(C.a) + '<span>⌄</span>';
   $('cTokB').innerHTML = lab(C.b) + '<span>⌄</span>';
   $('cFees').innerHTML = feeCards(C.fee, C.avail);
-  $('cMsg').textContent = '';
+  const tw = [C.a, C.b].filter(Boolean).map(t => tokenWarn(t.addr, t.symbol) && `⚠ ${t.symbol}：${tokenWarn(t.addr, t.symbol)}`).filter(Boolean);
+  $('cMsg').innerHTML = tw.map(x => `<div class="bad">${x}</div>`).join('');
   if (C.a && C.b) {
     if (C.a.addr === C.b.addr) { $('cMsg').innerHTML = '<span class="bad">同じトークンは選べません</span>'; return; }
     $('cMsg').textContent = 'プールを確認中…';
     C.avail = await feeAvail(C.a.addr, C.b.addr);
     $('cFees').innerHTML = feeCards(C.fee, C.avail);
     const a = C.avail[C.fee];
-    $('cMsg').innerHTML = a ? `<span class="good">このペア・手数料 ${C.fee / 10000}% のプールがあります。</span>`
-      : '<span class="warn">この手数料レベルのプールはまだありません。「プールあり」のカードを選んでください。</span>';
+    $('cMsg').innerHTML = tw.map(x => `<div class="bad">${x}</div>`).join('') + (a ? `<span class="good">このペア・手数料 ${C.fee / 10000}% のプールがあります。</span>`
+      : '<span class="warn">この手数料レベルのプールはまだありません。「プールあり」のカードを選んでください。</span>');
   }
 }
 async function createGo() {
@@ -724,8 +774,8 @@ async function renderTokList(q) {
   }
   const ql = q.toLowerCase();
   const list = all.filter(t => !q || t.symbol.toLowerCase().includes(ql) || t.name.toLowerCase().includes(ql)).slice(0, 80);
-  $('tokList').innerHTML = list.length ? list.map(t => `<div class="trow" data-addr="${t.addr}">${av(t.symbol, t.addr)}
-    <div><div>${t.name}</div><div class="sub">${t.symbol}${t.addr === WETH.toLowerCase() ? '（ETHで払うときもこれ）' : ''}</div></div></div>`).join('')
+  $('tokList').innerHTML = list.length ? list.map(t => { const w = tokenWarn(t.addr, t.symbol); return `<div class="trow" data-addr="${t.addr}">${av(t.symbol, t.addr)}
+    <div><div>${t.name}</div><div class="sub">${t.symbol}　<span class="mono">${t.addr.slice(0, 8)}…</span>${t.addr === WETH.toLowerCase() ? '（ETHで払うときもこれ）' : ''}</div>${w ? `<div class="sub bad">⚠ ${w}</div>` : ''}</div></div>`; }).join('')
     : '<div class="sub" style="padding:10px">見つかりません。トークンのアドレスを貼り付けてください。</div>';
 }
 async function pickToken(addr) {
@@ -776,6 +826,7 @@ async function loadPool(a, b, fee, expectAddr) {
     setRangePct(20);
     $('pFees').innerHTML = feeCards(fee, undefined);
     feeAvail(t0.addr, t1.addr).then(avl => { if (S.pool?.addr === addr) { S.pool.avail = avl; $('pFees').innerHTML = feeCards(fee, avl); } });
+    S.pool.tvl = undefined; renderPoolWarn();
     loadPoolDetail();
     await refreshBalances();
     if (S.account) loadPortfolio();
@@ -796,6 +847,7 @@ async function loadPoolDetail() {
     const tvl = g ? Number(g.reserve_in_usd) : (p0 != null && p1 != null ? a0 * p0 + a1 * p1 : NaN);
     const vol = g ? Number(g.volume_usd?.h24) : NaN;
     const apr = tvl > 0 && isFinite(vol) ? vol * (P.fee / 10000) / tvl * 365 : NaN;
+    P.tvl = isFinite(tvl) ? tvl : null; renderPoolWarn(P.tvl);
     $('poolDetail').innerHTML = `
       <div>流動性合計</div><div>${usd(tvl)}</div>
       <div>24h取引高</div><div>${usd(vol)}</div>
@@ -1087,6 +1139,7 @@ async function mint() {
     await signerReady();
     const P = S.pool, T = getTicks();
     if (!T) throw new Error('レンジを正しく入力してください');
+    if (S.warns?.length && !S.warnAck && !S.rebuild) throw new Error('上の「⚠ 注意」を読んで、「内容を確認したうえで進める」にチェックしてください');
     const [a0, a1] = desiredAmounts(P, $('amt0').value, $('amt1').value);
     if (a0 === 0n && a1 === 0n) throw new Error('入れる額を入力してください');
     const slip = Number($('slip').value);
