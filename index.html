@@ -116,6 +116,7 @@ a{color:var(--accent)}
       <div class="row">
         <button data-pct="5">±5%</button><button data-pct="10">±10%</button><button data-pct="20">±20%</button>
         <button data-pct="30">±30%</button><button data-pct="50">±50%</button><button data-pct="full">フルレンジ</button>
+        <span class="sub" style="margin-left:4px">±</span><input id="pctIn" type="number" min="0.1" max="99" step="any" placeholder="例 15" style="width:80px"><span class="sub">%</span>
       </div>
       <div class="row"><label>下限</label><input id="minP" type="number" step="any"><span class="sub unitTxt"></span></div>
       <div class="row"><label>上限</label><input id="maxP" type="number" step="any"><span class="sub unitTxt"></span></div>
@@ -901,7 +902,12 @@ $('btnInvert').onclick = () => {
   if (a > 0 && b > 0) { $('minP').value = Number((1 / b).toPrecision(6)); $('maxP').value = Number((1 / a).toPrecision(6)); }
   renderPrice(); updateRange();
 };
-document.querySelectorAll('[data-pct]').forEach(b => b.onclick = () => setRangePct(b.dataset.pct === 'full' ? 'full' : Number(b.dataset.pct)));
+document.querySelectorAll('[data-pct]').forEach(b => b.onclick = () => { $('pctIn').value = ''; setRangePct(b.dataset.pct === 'full' ? 'full' : Number(b.dataset.pct)); });
+// 手入力の幅（±%）：打つたびに反映。0〜99% の範囲だけ受け付ける
+$('pctIn').oninput = () => {
+  const v = Number($('pctIn').value);
+  if (S.pool && v > 0 && v < 100) setRangePct(v);
+};
 $('minP').oninput = $('maxP').oninput = () => { S.full = false; updateRange(); };
 $('amt0').oninput = () => { S.lastEdited = 0; syncAmounts(0); };
 $('amt1').oninput = () => { S.lastEdited = 1; syncAmounts(1); };
