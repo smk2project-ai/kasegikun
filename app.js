@@ -1189,11 +1189,11 @@ function renderEarnings(sums) {
   // ポジション別
   rows.sort((a, b) => Number(b.P.id - a.P.id));
   const f = x => x == null ? '-' : usd(x);
-  $('earnTable').innerHTML = `<table class="tbl"><tr><th>ポジション</th><th>状態</th><th>入れた額</th><th>引き出した額</th><th>手数料（回収＋未回収）</th><th>今の評価額</th><th>損益</th></tr>
+  $('earnTable').innerHTML = `<table class="tbl"><tr><th>ポジション</th><th>状態</th><th>入れた額</th><th>引き出した額</th><th title="回収した分＋未回収の分">手数料</th><th>今の評価額</th><th>損益</th></tr>
     ${rows.map(({ P, r }) => {
       const inR = P.tick >= P.tl && P.tick < P.tu, st = P.L === 0n ? '閉じた' : inR ? '<span class="good">レンジ内</span>' : '<span class="bad">レンジ外</span>';
       const memo = memos()[String(P.id)];
-      return `<tr><td><b>${P.t0.symbol}/${P.t1.symbol}</b> <span class="sub">${P.fee / 10000}%　#${P.id}${memo ? '　' + memo : ''}</span></td><td>${st}</td>
+      return `<tr><td><b>${P.t0.symbol}/${P.t1.symbol}</b> <span class="sub">${P.fee / 10000}%</span><br><span class="sub">#${P.id}${memo ? '　' + memo : ''}</span></td><td>${st}</td>
         <td>${f(r.dep)}</td><td>${f(r.wd)}</td><td class="good">${f((r.fee || 0) + (r.unc || 0))}</td><td>${f(r.cur)}</td>
         <td class="${r.pl >= 0 ? 'good' : 'bad'}">${r.pl >= 0 ? '+' : '−'}${usd(Math.abs(r.pl))}</td></tr>`;
     }).join('')}</table>`;
