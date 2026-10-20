@@ -114,6 +114,22 @@ details.box summary{cursor:pointer;font-weight:600}
 .panel{border-top:1px dashed var(--line);margin-top:12px;padding-top:12px}
 .stat{background:var(--panel2);border-radius:12px;padding:14px;flex:1;min-width:160px}
 .stat .v{font-size:20px;font-weight:700;margin-top:4px}
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl th,.tbl td{padding:9px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+.tbl th:first-child,.tbl td:first-child{text-align:left}
+.tbl th{color:var(--sub);font-weight:500}
+.bars{display:flex;align-items:flex-end;gap:10px;height:170px;padding:24px 4px 0;border-bottom:1px solid var(--line)}
+.bars .b{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:28px}
+.bars .b i{display:block;width:70%;max-width:46px;background:var(--accent);border-radius:6px 6px 0 0;min-height:2px}
+.bars .b span{font-size:11px;color:var(--sub);margin-bottom:4px;white-space:nowrap}
+.blabels{display:flex;gap:10px;padding:6px 4px 0}
+.blabels span{flex:1;text-align:center;font-size:11px;color:var(--sub);min-width:28px}
+.hist{display:flex;flex-direction:column;gap:8px;max-height:620px;overflow:auto}
+.hrow{background:var(--panel2);border-radius:10px;padding:10px 12px}
+.hrow .t{display:flex;justify-content:space-between;font-size:12px;color:var(--sub)}
+.hrow .v{font-size:16px;font-weight:700;margin:2px 0}
+.earnView{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px}
+@media(max-width:1250px){.earnView{grid-template-columns:minmax(0,1fr)}}
 /* トークン選択 */
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:20;padding:16px}
 .modal.open{display:flex}
@@ -136,8 +152,10 @@ details.box summary{cursor:pointer;font-weight:600}
   <nav>
     <button id="navPair" class="on">ペアを選択</button>
     <button id="navPos">私の流動性</button>
+    <button id="navEarn">収益概要</button>
   </nav>
   <select id="chainSel" title="チェーン"></select>
+  <span id="gasChip" class="chip" title="今のガス代の相場（取引1回の手数料の目安）">Gas: -</span>
   <span id="netChip" class="chip">未接続</span>
   <button id="btnConnect" class="primary">メタマスクに接続</button>
 </header>
@@ -283,6 +301,32 @@ details.box summary{cursor:pointer;font-weight:600}
           <div class="row"><input id="lookId" type="number" placeholder="例：1466328" style="flex:1"><button id="btnLook">表示</button></div>
           <div class="sub">他のウォレットのポジションも見るだけならできます（Smart Vault のものなど）。</div>
           <div id="lookBox" style="margin-top:10px"></div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 収益概要 -->
+    <div id="viewEarn" class="earnView" style="display:none">
+      <section>
+        <div class="card">
+          <div class="row between"><h2 style="margin:0">収益概要</h2><button class="link" id="btnEarnReload">リロード</button></div>
+          <div class="sub" style="margin-bottom:12px">接続したウォレットのポジションの記録をチェーンから読んで集計します。ドル換算は<b>今の価格</b>で計算しています。</div>
+          <div class="row" id="earnStats"><div class="empty">メタマスクに接続すると表示されます。</div></div>
+          <div class="sub" id="earnMsg"></div>
+        </div>
+        <div class="card">
+          <h2>月ごとの手数料収入（回収した分）</h2>
+          <div id="earnBars"><div class="empty">-</div></div>
+        </div>
+        <div class="card">
+          <h2>ポジション別</h2>
+          <div style="overflow-x:auto" id="earnTable"><div class="empty">-</div></div>
+        </div>
+      </section>
+      <aside>
+        <div class="card">
+          <h2>操作履歴</h2>
+          <div class="hist" id="earnHist"><div class="empty">-</div></div>
         </div>
       </aside>
     </div>

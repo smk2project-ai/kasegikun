@@ -64,6 +64,8 @@ const NPM_ABI = [
   'function unwrapWETH9(uint256 amountMinimum,address recipient) payable',
   'function sweepToken(address token,uint256 amountMinimum,address recipient) payable',
   'event IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
+  'event DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)',
+  'event Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)',
 ];
 const FACTORY_ABI = ['function getPool(address,address,uint24) view returns (address)'];
 const ROUTER_ABI = [
@@ -157,6 +159,8 @@ function amountsFromL(L, sqrtP, tl, tu) {
 function showView(v) {
   $('viewPair').style.display = v === 'pair' ? '' : 'none';
   $('viewPos').style.display = v === 'pos' ? '' : 'none';
+  $('viewEarn').style.display = v === 'earn' ? '' : 'none';
+  $('navEarn').classList.toggle('on', v === 'earn');
   $('navPair').classList.toggle('on', v === 'pair');
   $('navPos').classList.toggle('on', v === 'pos');
 }
@@ -580,8 +584,8 @@ function setRangePct(pct) {
 }
 function onMaxR() { const v = Number($('maxR').value); if ($('maxR').value !== '' && v > -100) { S.full = false; $('maxP').value = rnd(curDisp() * (1 + v / 100)); updateRange(); } }
 function onMinR() { const v = Number($('minR').value); if ($('minR').value !== '' && v < 100) { S.full = false; $('minP').value = rnd(curDisp() * (1 - v / 100)); updateRange(); } }
-function onMaxP() { const p = Number($('maxP').value); S.full = false; if (p > 0) $('maxR').value = rnd((p / curDisp() - 1) * 100); updateRange(); }
-function onMinP() { const p = Number($('minP').value); S.full = false; if (p > 0) $('minR').value = rnd((1 - p / curDisp()) * 100); updateRange(); }
+function onMaxP() { const p = Number($('maxP').value); S.full = false; if (p > 0) $('maxR').value = Number(((p / curDisp() - 1) * 100).toFixed(2)); updateRange(); }
+function onMinP() { const p = Number($('minP').value); S.full = false; if (p > 0) $('minR').value = Number(((1 - p / curDisp()) * 100).toFixed(2)); updateRange(); }
 function getTicks() {
   const P = S.pool, sp = P.spacing;
   const lo = Math.ceil(MIN_TICK / sp) * sp, hi = Math.floor(MAX_TICK / sp) * sp;
@@ -1032,6 +1036,179 @@ async function run(card, fn) {
   loadPortfolio();
 }
 
+// ===== ガス代の表示 =====
+async function updateGas() {
+  try { const f = await rpc.getFeeData(); $('gasChip').textContent = `Gas: ${Number(ethers.formatUnits(f.gasPrice ?? 0n, 'gwei')).toPrecision(3)} Gwei`; } catch {}
+}
+
+// ===== 収益概要 =====
+// ポジションごとに、作成・追加・引き出し・回収の記録（イベント）をチェーンから読む。
+// RPCの制限：1回に 1,000万ブロックまで・ポジション番号は1つずつ。新しい方から過去へ読み、作成の記録まで見つかったら止める。
+const EV = {
+  inc: npmIface.getEvent('IncreaseLiquidity').topicHash, dec: npmIface.getEvent('DecreaseLiquidity').topicHash,
+  col: npmIface.getEvent('Collect').topicHash, transfer: ethers.id('Transfer(address,address,uint256)'),
+};
+const LOG_SPAN = 10_000_000, MAX_CHUNKS = 60;
+const E = { busy: false };
+// 回数制限に当たると失敗する（Failed to fetch／Too Many Requests）ので、待ってやり直す
+async function retry(fn) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) { if (i >= 5) throw e; await new Promise(r => setTimeout(r, [1500, 3000, 6000, 10000, 15000][i])); }
+  }
+}
+async function getLogsSafe(params) {
+  await new Promise(r => setTimeout(r, 250)); // 続けて問い合わせすぎないように少し空ける
+  return retry(() => rpc.send('eth_getLogs', [params]));
+}
+function parseEvents(raw) {
+  return raw.filter(l => [EV.inc, EV.dec, EV.col].includes(l.topics[0])).map(l => {
+    const ev = npmIface.parseLog(l);
+    const k = l.topics[0] === EV.inc ? 'inc' : l.topics[0] === EV.dec ? 'dec' : 'col';
+    return { k, liq: k === 'col' ? '0' : ev.args.liquidity.toString(), a0: ev.args.amount0.toString(), a1: ev.args.amount1.toString(),
+      block: parseInt(l.blockNumber, 16), ts: l.blockTimestamp ? parseInt(l.blockTimestamp, 16) : 0, tx: l.transactionHash, li: parseInt(l.logIndex, 16) };
+  });
+}
+async function isMintTx(txHash, id) {
+  const r = await retry(() => rpc.getTransactionReceipt(txHash));
+  return r.logs.some(l => l.address.toLowerCase() === NPM.toLowerCase() && l.topics[0] === EV.transfer && BigInt(l.topics[1]) === 0n && BigInt(l.topics[3]) === BigInt(id));
+}
+async function positionEvents(pos, latest) {
+  const key = `nba.ev.${CHAIN_KEY}.${pos.id}`, cache = store.get(key, null), idTopic = ethers.toBeHex(pos.id, 32);
+  const range = (f, t) => getLogsSafe({ address: NPM, topics: [null, idTopic], fromBlock: ethers.toQuantity(f), toBlock: ethers.toQuantity(t) });
+  let evs = cache?.evs || [];
+  if (cache?.complete) {
+    for (let f = cache.upto + 1; f <= latest; f += LOG_SPAN) evs.push(...parseEvents(await range(f, Math.min(latest, f + LOG_SPAN - 1))));
+  } else {
+    evs = []; let complete = false;
+    for (let n = 0, t = latest; n < MAX_CHUNKS && t >= 0; n++, t -= LOG_SPAN) {
+      evs.push(...parseEvents(await range(Math.max(0, t - LOG_SPAN + 1), t)));
+      const inc = evs.filter(e => e.k === 'inc');
+      const net = inc.reduce((s, e) => s + BigInt(e.liq), 0n) - evs.filter(e => e.k === 'dec').reduce((s, e) => s + BigInt(e.liq), 0n);
+      // 流動性の出入りの合計が今の流動性と合い、いちばん古い追加が「作成」の取引なら全部そろった
+      if (inc.length && net === pos.L) {
+        const first = inc.reduce((a, b) => (a.block < b.block || (a.block === b.block && a.li < b.li)) ? a : b);
+        if (await isMintTx(first.tx, pos.id)) { complete = true; break; }
+      }
+    }
+    if (!complete) log(`#${pos.id} の記録をすべては読めませんでした（古すぎる可能性）。集計は読めた分だけです。`);
+    store.set(key, { upto: latest, complete, evs });
+    return evs.sort((a, b) => a.block - b.block || a.li - b.li);
+  }
+  store.set(key, { upto: latest, complete: true, evs });
+  return evs.sort((a, b) => a.block - b.block || a.li - b.li);
+}
+// 1ポジションの集計：引き出した元本と、回収した手数料を分ける（回収のうち引き出し分までが元本、残りが手数料）
+function summarizePosition(pos, evs) {
+  const z = () => [0n, 0n];
+  const dep = z(), wd = z(), fee = z(), pend = z(), rows = [];
+  let first = true;
+  const byTx = {};
+  for (const e of evs) (byTx[e.tx] = byTx[e.tx] || { ts: e.ts, block: e.block, tx: e.tx, inc: z(), dec: z(), fee: z() });
+  for (const e of evs) {
+    const a = [BigInt(e.a0), BigInt(e.a1)], g = byTx[e.tx];
+    if (e.k === 'inc') { for (const i of [0, 1]) { dep[i] += a[i]; g.inc[i] += a[i]; } if (first) { g.mint = true; first = false; } }
+    if (e.k === 'dec') for (const i of [0, 1]) { wd[i] += a[i]; pend[i] += a[i]; g.dec[i] += a[i]; }
+    if (e.k === 'col') for (const i of [0, 1]) { const p = a[i] < pend[i] ? a[i] : pend[i]; pend[i] -= p; fee[i] += a[i] - p; g.fee[i] += a[i] - p; }
+  }
+  return { pos, dep, wd, fee, txs: Object.values(byTx) };
+}
+// 記録に日時が入っていないチェーン（Robinhood は 0 になる）では、ブロックの日時を問い合わせて補う。調べた日時は保存
+async function fillTimestamps(evs) {
+  const key = 'nba.bts.' + CHAIN_KEY, bts = store.get(key, {});
+  const need = [...new Set(evs.filter(e => !e.ts && !bts[e.block]).map(e => e.block))];
+  for (const [i, b] of need.entries()) {
+    $('earnMsg').textContent = `取引の日時を調べています… ${i + 1} / ${need.length}`;
+    const blk = await retry(() => rpc.getBlock(b));
+    bts[b] = blk.timestamp;
+    if (i % 10 === 9) store.set(key, bts);
+  }
+  store.set(key, bts);
+  evs.forEach(e => { if (!e.ts) e.ts = bts[e.block] || 0; });
+}
+async function loadEarnings(force) {
+  if (!S.account) { $('earnStats').innerHTML = '<div class="empty">メタマスクに接続すると表示されます。</div>'; return; }
+  if (E.busy) return; E.busy = true;
+  try {
+    $('earnMsg').textContent = 'ポジションを読み込んでいます…（回数制限に当たると少し時間がかかります）';
+    if (force || !Object.keys(S.positions).length) await loadPositions();
+    const list = Object.values(S.positions).sort((a, b) => Number(a.id - b.id));
+    if (!list.length) { $('earnStats').innerHTML = '<div class="empty">このウォレットのポジションはまだありません。</div>'; return; }
+    const latest = await retry(() => rpc.getBlockNumber());
+    const sums = [];
+    const evsList = [];
+    for (const [i, p] of list.entries()) {
+      $('earnMsg').textContent = `記録を読んでいます… ${i + 1} / ${list.length}（#${p.id}）`;
+      evsList.push(await positionEvents(p, latest));
+    }
+    await fillTimestamps(evsList.flat());
+    list.forEach((p, i) => sums.push(summarizePosition(p, evsList[i])));
+    $('earnMsg').textContent = '';
+    await ensurePrices(list.flatMap(p => [p.t0.addr, p.t1.addr]));
+    renderEarnings(sums);
+  } catch (e) { $('earnMsg').textContent = '読み込みエラー：' + errMsg(e); }
+  finally { E.busy = false; }
+}
+function renderEarnings(sums) {
+  const val = (t, raw) => { const p = priceOf(t); return p != null ? toNum(raw, t.decimals) * p : null; };
+  const pair = (pos, a) => { const v0 = val(pos.t0, a[0]), v1 = val(pos.t1, a[1]); return v0 == null || v1 == null ? null : v0 + v1; };
+  const tot = { dep: 0, wd: 0, fee: 0, unc: 0, cur: 0 }, rows = [], hist = [], months = {};
+  let missing = false;
+  for (const s of sums) {
+    const P = s.pos, v = posValues(P);
+    const r = { dep: pair(P, s.dep), wd: pair(P, s.wd), fee: pair(P, s.fee), unc: v.fval, cur: P.L > 0n ? v.val : 0 };
+    if (Object.values(r).some(x => x == null)) missing = true;
+    for (const k in tot) tot[k] += r[k] || 0;
+    r.pl = (r.cur || 0) + (r.wd || 0) + (r.fee || 0) + (r.unc || 0) - (r.dep || 0);
+    rows.push({ P, r });
+    for (const g of s.txs) {
+      const d = g.ts ? new Date(g.ts * 1000) : null;
+      const push = (kind, a, sign) => { const u = pair(P, a); hist.push({ ts: g.ts, d, kind, P, a, u, tx: g.tx, sign }); return u; };
+      if (g.inc[0] || g.inc[1]) push(g.mint ? 'ペアを作成' : '流動性を追加', g.inc);
+      if (g.dec[0] || g.dec[1]) push('引き出し', g.dec);
+      if (g.fee[0] || g.fee[1]) {
+        const u = push('手数料を回収', g.fee, '+');
+        if (d && u != null) { const m = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`; months[m] = (months[m] || 0) + u; }
+      }
+    }
+  }
+  const pl = tot.cur + tot.wd + tot.fee + tot.unc - tot.dep;
+  const stat = (label, v, cls = '') => `<div class="stat"><div class="sub">${label}</div><div class="v ${cls}">${usd(v)}</div></div>`;
+  $('earnStats').innerHTML = stat('入れた額の合計', tot.dep) + stat('引き出した額', tot.wd) + stat('回収した手数料', tot.fee, 'good')
+    + stat('未回収の手数料', tot.unc, 'good') + stat('今の評価額', tot.cur) + `<div class="stat"><div class="sub">損益</div><div class="v ${pl >= 0 ? 'good' : 'bad'}">${pl >= 0 ? '+' : '−'}${usd(Math.abs(pl))}</div></div>`;
+  $('earnMsg').innerHTML = (missing ? '<span class="warn">価格が分からないトークンがあり、一部のドル換算が入っていません。</span><br>' : '')
+    + '損益＝今の評価額＋引き出した額＋回収した手数料＋未回収の手数料−入れた額（すべて今の価格で換算）。価格の上下による増減（インパーマネントロス）もここに含まれます。';
+  // 月ごとの手数料
+  const keys = Object.keys(months).sort().slice(-12);
+  if (!keys.length) $('earnBars').innerHTML = '<div class="empty">まだ手数料の回収はありません。</div>';
+  else {
+    const max = Math.max(...keys.map(k => months[k]));
+    $('earnBars').innerHTML = `<div class="bars">${keys.map(k => `<div class="b"><span>${usd(months[k])}</span><i style="height:${Math.max(2, months[k] / max * 120)}px"></i></div>`).join('')}</div>
+      <div class="blabels">${keys.map(k => `<span>${k}</span>`).join('')}</div>`;
+  }
+  // ポジション別
+  rows.sort((a, b) => Number(b.P.id - a.P.id));
+  const f = x => x == null ? '-' : usd(x);
+  $('earnTable').innerHTML = `<table class="tbl"><tr><th>ポジション</th><th>状態</th><th>入れた額</th><th>引き出した額</th><th>手数料（回収＋未回収）</th><th>今の評価額</th><th>損益</th></tr>
+    ${rows.map(({ P, r }) => {
+      const inR = P.tick >= P.tl && P.tick < P.tu, st = P.L === 0n ? '閉じた' : inR ? '<span class="good">レンジ内</span>' : '<span class="bad">レンジ外</span>';
+      const memo = memos()[String(P.id)];
+      return `<tr><td><b>${P.t0.symbol}/${P.t1.symbol}</b> <span class="sub">${P.fee / 10000}%　#${P.id}${memo ? '　' + memo : ''}</span></td><td>${st}</td>
+        <td>${f(r.dep)}</td><td>${f(r.wd)}</td><td class="good">${f((r.fee || 0) + (r.unc || 0))}</td><td>${f(r.cur)}</td>
+        <td class="${r.pl >= 0 ? 'good' : 'bad'}">${r.pl >= 0 ? '+' : '−'}${usd(Math.abs(r.pl))}</td></tr>`;
+    }).join('')}</table>`;
+  // 操作履歴
+  hist.sort((a, b) => b.ts - a.ts);
+  const day0 = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const ago = d => { if (!d) return ''; const days = Math.round((day0(new Date()) - day0(d)) / 864e5); return days <= 0 ? '今日' : days === 1 ? '昨日' : `${days}日前`; };
+  $('earnHist').innerHTML = hist.length ? hist.slice(0, 150).map(h => `<div class="hrow">
+      <div class="t"><span>${ago(h.d)}</span><span>${h.d ? h.d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><b>${h.kind}</b><span class="sub">#${h.P.id} ${h.P.t0.symbol}/${h.P.t1.symbol}</span></div>
+      <div class="v ${h.sign ? 'good' : ''}">${h.u != null ? (h.sign || '') + usd(h.u) : '-'}</div>
+      <div class="sub">${fmt(toNum(h.a[0], h.P.t0.decimals))} ${h.P.t0.symbol}　${fmt(toNum(h.a[1], h.P.t1.decimals))} ${h.P.t1.symbol}　<a href="${CHAIN.explorer}/tx/${h.tx}" target="_blank">取引</a></div>
+    </div>`).join('') : '<div class="empty">記録がありません。</div>';
+}
+
 // ===== イベント =====
 Object.entries(CHAINS).forEach(([k, c]) => $('chainSel').add(new Option(c.name, k, false, k === CHAIN_KEY)));
 $('chainSel').onchange = () => {
@@ -1041,6 +1218,8 @@ $('chainSel').onchange = () => {
 $('btnConnect').onclick = connect;
 $('navPair').onclick = () => showView('pair');
 $('navPos').onclick = () => { showView('pos'); if (S.account) loadPositions(); };
+$('navEarn').onclick = () => { showView('earn'); loadEarnings(); };
+$('btnEarnReload').onclick = () => loadEarnings(true);
 $('btnPfReload').onclick = loadPortfolio;
 document.querySelectorAll('#pickTabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#pickTabs button').forEach(x => x.classList.toggle('on', x === b));
@@ -1118,5 +1297,6 @@ if (window.ethereum) {
   window.ethereum.on?.('accountsChanged', () => { S.signer = null; connect(); });
   window.ethereum.on?.('chainChanged', () => location.reload());
 }
+updateGas(); setInterval(updateGas, 30000);
 selectPoolAddr((L.favs[0] || DEFAULT_FAVS[0]).addr);
 (async () => { for (let i = 0; i < 3; i++) await loadMorePairs(); })(); // 最初は60件
