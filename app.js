@@ -41,6 +41,7 @@ const DEFAULT_FAVS = CHAIN.favs;
 // ペア一覧・ドル価格の取得元（GeckoTerminal 公開API・無料・1分30回まで）
 const GECKO = 'https://api.geckoterminal.com/api/v2';
 const GECKO_DEX = CHAIN.geckoDex;
+const GECKO_GAP_MIN = 6500, GECKO_GAP_MAX = 15000; // 問い合わせの間隔（ミリ秒）。実測で1分8〜10回が上限。制限に当たると自動で広げる
 const MAX128 = (1n << 128n) - 1n;
 const MIN_TICK = -887272, MAX_TICK = 887272;
 const FEE_LEVELS = [
@@ -219,19 +220,26 @@ async function ensureAllowance(tok, amount, spender = NPM) {
 }
 
 // ===== GeckoTerminal（一覧・ドル価格） =====
-let geckoLast = 0;
-async function gecko(path) {
-  const wait = geckoLast + 2100 - Date.now(); // 回数制限よけ：2.1秒あける
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  geckoLast = Date.now();
-  // 回数制限に当たると 429（CORSなしで Failed to fetch になることも）→ 待って2回までやり直す
+let geckoLast = 0, geckoGap = GECKO_GAP_MIN;
+// 問い合わせは1本ずつ順番に（同時に投げると回数制限に当たりやすい）
+let geckoQueue = Promise.resolve();
+function gecko(path) {
+  const job = geckoQueue.then(() => geckoFetch(path));
+  geckoQueue = job.catch(() => {});
+  return job;
+}
+async function geckoFetch(path) {
+  // 回数制限に当たると 429（CORSなしで Failed to fetch になることも）→ 間隔を広げて、待ってやり直す
   for (let i = 0; ; i++) {
+    const wait = geckoLast + geckoGap - Date.now();
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    geckoLast = Date.now();
     let r = null;
     try { r = await fetch(GECKO + path, { headers: { accept: 'application/json' } }); } catch {}
-    if (r?.ok) { const j = await r.json(); absorbGecko(j); return j; }
-    if (i >= 2) throw new Error('一覧の取得に失敗しました（回数制限）。1分ほど待ってからもう一度。');
-    await new Promise(res => setTimeout(res, 15000 * (i + 1)));
-    geckoLast = Date.now();
+    if (r?.ok) { geckoGap = Math.max(GECKO_GAP_MIN, geckoGap - 1000); const j = await r.json(); absorbGecko(j); return j; } // 成功が続けば間隔を少しずつ戻す
+    geckoGap = Math.min(geckoGap * 2, GECKO_GAP_MAX);
+    if (i >= 3) throw new Error('データの取得に失敗しました（回数制限）。1分ほど待ってからもう一度。');
+    await new Promise(res => setTimeout(res, 10000 * (i + 1)));
   }
 }
 // 返ってきたデータから、トークン名とドル価格を覚えておく
@@ -366,6 +374,7 @@ async function searchPairs(q) {
   renderPairs();
 }
 function renderPairs() {
+  if (L.sort === 'ana') { renderAnalysis(); return; }
   const min = Number($('minTvl').value);
   let list;
   if (L.sort === 'fav') {
@@ -391,6 +400,94 @@ function renderPairs() {
       ${p.tvl == null ? '' : `<div class="bottom"><span>◆ 平均APR: <span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(2)) + '%' : '-'}</span></span><span class="sub">${p.addr.slice(0, 8)}…</span></div>`}
     </div>`;
   }).join('');
+}
+
+// ===== 分析順（過去30日の値動きから、手数料とインパーマネントロスの見積もりを比べる） =====
+// どちらも「全価格帯に入れた場合」の年率の目安。レンジを狭くすると両方とも同じ倍率で大きくなるので、差し引きの符号は変わらない。
+const ANA_KEY = 'nba.ana.' + CHAIN_KEY, ANA_TTL = 24 * 3600 * 1000, ANA_N = 20, ANA_MIN_TVL = 50000;
+const A = { busy: false, data: store.get(ANA_KEY, null), sort: 'net' };
+function normCdf(x) { // 標準正規分布の累積（近似）
+  const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2);
+  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - p : p;
+}
+async function analyzePool(p) {
+  // 日足は1日保存して、分析し直すときに問い合わせを減らす
+  const ck = `nba.ohlcv.${CHAIN_KEY}.${p.addr}`, hit = store.get(ck, null);
+  let list = hit && Date.now() - hit.ts < ANA_TTL ? hit.list : null;
+  if (!list) {
+    const j = await gecko(`/networks/${CHAIN.gecko}/pools/${p.addr}/ohlcv/day?aggregate=1&limit=31&currency=token`);
+    list = j?.data?.attributes?.ohlcv_list || [];
+    store.set(ck, { ts: Date.now(), list });
+  }
+  const rows = list.slice(1).reverse(); // 古い順。今日（途中）の分は除く
+  const closes = rows.map(r => Number(r[4])).filter(c => c > 0);
+  const rets = closes.slice(1).map((c, i) => Math.log(c / closes[i]));
+  const n = rets.length;
+  if (n < 7) return { addr: p.addr, days: closes.length, short: true };
+  const mean = rets.reduce((a, b) => a + b, 0) / n;
+  const sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / (n - 1)); // 1日の変動
+  const sigmaY = sd * Math.sqrt(365);                                            // 年率の変動
+  const quoteUsd = S.prices[p.quote];
+  const volUsd = quoteUsd != null ? rows.reduce((a, r) => a + Number(r[5]), 0) / rows.length * quoteUsd : NaN; // 30日平均の取引高（ドル）
+  const feeApr = p.fee && p.tvl > 0 && isFinite(volUsd) ? volUsd * p.fee / p.tvl * 365 : NaN; // %
+  const ilApr = sigmaY ** 2 / 8 * 100;                                           // %
+  const z = sd > 0 ? Math.log(1.2) / (sd * Math.sqrt(7)) : Infinity;
+  return { addr: p.addr, days: closes.length, sigmaY: sigmaY * 100, feeApr, ilApr, net: feeApr - ilApr, out7: 2 * (1 - normCdf(z)) * 100, volUsd };
+}
+async function runAnalysis() {
+  if (A.busy) return; A.busy = true;
+  try {
+    while (L.pools.length < 80 && L.page < 4) await loadMorePairs(); // 候補を増やす
+    const min = Math.max(Number($('minTvl').value), ANA_MIN_TVL);
+    const cand = L.pools.filter(p => p.tvl >= min && p.fee && !tokenWarn(p.base) && !tokenWarn(p.quote))
+      .sort((a, b) => b.apr - a.apr).slice(0, ANA_N);
+    const items = [];
+    for (const [i, p] of cand.entries()) {
+      A.progress = `分析しています… ${i + 1} / ${cand.length}（${p.name}）　残り約${Math.ceil((cand.length - i) * geckoGap / 60000)}分。待っている間も、ほかの画面は使えます。`;
+      if ($('anaMsg')) $('anaMsg').textContent = A.progress;
+      try { items.push({ ...p, ...(await analyzePool(p)) }); } catch (e) { items.push({ ...p, err: true }); }
+    }
+    A.data = { ts: Date.now(), min, items };
+    store.set(ANA_KEY, A.data);
+  } finally { A.busy = false; renderPairs(); }
+}
+const pct = (x, d = 1) => isFinite(x) ? x.toFixed(d) + '%' : '-';
+function renderAnalysis() {
+  $('btnMore').style.display = 'none';
+  const head = `<div class="anaHead"><b style="color:var(--text)">分析順の見方</b><br>
+    「差し引き」＝手数料APR（30日平均）−予想インパーマネントロス（年率）。値動きの小さい（変動率が低い）ペアほどロスが小さく、差し引きがプラスで大きいほど、過去30日のデータでは手数料がロスを上回っていたことを示します。
+    どちらも全価格帯に入れた場合の目安で、レンジを狭くすると両方が同じ倍率で大きくなります。<b>過去のデータからの見積もりで、将来の利益を保証するものではありません。</b>対象は流動性 $5万以上・「⚠ 要確認」のないペアのうち、平均APRの高い上位${ANA_N}件です。</div>`;
+  if (A.busy) { $('pairList').innerHTML = head + `<div class="empty" id="anaMsg">${A.progress || '分析しています…'}</div>`; return; }
+  const d = A.data;
+  if (!d || Date.now() - d.ts > ANA_TTL) {
+    $('pairList').innerHTML = head + `<div class="empty">${d ? '前回の分析から1日以上たっています。' : 'まだ分析していません。'}<br><br><button class="primary" id="btnAna">分析する（1分ほどかかります）</button></div>`;
+    $('btnAna').onclick = runAnalysis; return;
+  }
+  const items = d.items.filter(x => !x.err && !x.short && isFinite(x.net))
+    .sort((a, b) => A.sort === 'vol' ? a.sigmaY - b.sigmaY : b.net - a.net);
+  const skipped = d.items.length - items.length;
+  const sel = S.pool?.addr?.toLowerCase();
+  $('pairMsg').textContent = `分析日時 ${new Date(d.ts).toLocaleString('ja-JP')}　${items.length}件${skipped ? `（データ不足で除外 ${skipped}件）` : ''}`;
+  $('pairList').innerHTML = head + `<div class="row between" style="margin:10px 0"><div class="tabs" style="margin:0">
+      <button data-asort="net" class="${A.sort === 'net' ? 'on' : ''}">差し引きの大きい順</button>
+      <button data-asort="vol" class="${A.sort === 'vol' ? 'on' : ''}">値動きの小さい順</button></div><button id="btnAna">分析し直す</button></div>` + items.map((p, i) => {
+    const title = p.name.replace(/\s*[\d.]+%\s*$/, ''), syms = title.split(' / '), feeTxt = (p.name.match(/([\d.]+%)\s*$/) || [])[1] || '';
+    return `<div class="pcard ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}">
+      <div class="top"><span class="chip ${i < 3 ? 'on' : ''}">${i + 1}</span><div class="avs">${av(syms[0] || '?', p.base || syms[0])}${av(syms[1] || '?', p.quote || syms[1])}</div>
+        <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料 ${feeTxt}</span>` : ''}${p.days < 20 ? ' <span class="chip">データ少なめ</span>' : ''}${p.sigmaY >= 100 ? ' <span class="chip off" title="1年あたりの値動きが100%以上。レンジを外れやすい">値動き大</span>' : ''}
+          <div class="sub" style="margin-top:4px">流動性 ${usd(p.tvl)}・30日平均の取引高 ${usd(p.volUsd)}/日</div></div>
+        <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
+      <div class="metrics">
+        <div><small>手数料APR（30日）</small><b class="good">${pct(p.feeApr)}</b></div>
+        <div><small>変動率（年）</small><b>${pct(p.sigmaY, 0)}</b></div>
+        <div><small>予想ロス（年）</small><b class="bad">${pct(p.ilApr)}</b></div>
+        <div><small>差し引き</small><b class="${p.net >= 0 ? 'good' : 'bad'}">${p.net >= 0 ? '+' : ''}${pct(p.net)}</b></div>
+        <div><small>1週間で±20%を外れる確率</small><b>${pct(p.out7, 0)}</b></div>
+      </div></div>`;
+  }).join('');
+  $('btnAna').onclick = runAnalysis;
+  document.querySelectorAll('[data-asort]').forEach(b => b.onclick = e => { e.stopPropagation(); A.sort = b.dataset.asort; renderAnalysis(); });
 }
 
 // ===== 手数料レベル（カード） =====
@@ -552,7 +649,11 @@ async function loadPoolDetail() {
       <div>24h取引高</div><div>${usd(vol)}</div>
       <div>平均APR（推定）</div><div class="apr">${isFinite(apr) ? apr.toFixed(2) + '%' : '-'}</div>
       <div>${P.t0.symbol}</div><div>${fmt(a0)}　<span class="sub">${p0 != null ? usd(a0 * p0) : ''}</span></div>
-      <div>${P.t1.symbol}</div><div>${fmt(a1)}　<span class="sub">${p1 != null ? usd(a1 * p1) : ''}</span></div>`;
+      <div>${P.t1.symbol}</div><div>${fmt(a1)}　<span class="sub">${p1 != null ? usd(a1 * p1) : ''}</span></div>`
+      + (() => { const x = A.data?.items?.find(i => i.addr === P.addr.toLowerCase() && isFinite(i.net)); return x ? `
+      <div>変動率（年・30日）</div><div>${pct(x.sigmaY, 0)}</div>
+      <div>予想ロス（年）</div><div class="bad">${pct(x.ilApr)}</div>
+      <div>差し引き（分析）</div><div class="${x.net >= 0 ? 'good' : 'bad'}">${x.net >= 0 ? '+' : ''}${pct(x.net)}</div>` : ''; })();
     renderUsd();
   } catch (e) { $('poolDetail').innerHTML = `<div>読み込みエラー</div><div>${errMsg(e)}</div>`; }
 }
@@ -1299,4 +1400,4 @@ if (window.ethereum) {
 }
 updateGas(); setInterval(updateGas, 30000);
 selectPoolAddr((L.favs[0] || DEFAULT_FAVS[0]).addr);
-(async () => { for (let i = 0; i < 3; i++) await loadMorePairs(); })(); // 最初は60件
+(async () => { for (let i = 0; i < 2; i++) await loadMorePairs(); })(); // 最初は40件

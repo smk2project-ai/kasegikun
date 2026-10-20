@@ -70,6 +70,12 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .pcard .bottom{display:flex;justify-content:space-between;margin-top:10px;font-size:13px}
 .apr{color:var(--good);font-weight:700}
 .star{background:none;border:0;font-size:18px;color:var(--sub);padding:2px 6px}
+.metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-top:10px}
+@media(max-width:700px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.metrics div{background:var(--panel3);border-radius:8px;padding:6px 8px}
+.metrics small{display:block;font-size:10px;color:var(--sub);line-height:1.3}
+.metrics b{font-size:14px}
+.anaHead{background:var(--panel2);border-radius:12px;padding:12px;font-size:12px;color:var(--sub);line-height:1.6}
 .star.on{color:var(--warn)}
 /* 手数料レベル */
 .fees{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
@@ -183,6 +189,7 @@ details.box summary{cursor:pointer;font-weight:600}
             <button data-sort="apr">APRが高い順</button>
             <button data-sort="tvl">流動性順</button>
             <button data-sort="fav">☆ お気に入り</button>
+            <button data-sort="ana">📊 分析順</button>
           </div>
           <div class="row">
             <input id="pairQ" placeholder="トークン名・アドレスで検索（例：NVDA、Index）" style="flex:1">
