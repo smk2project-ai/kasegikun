@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NBA 流動性管理</title>
+<script src="lib/ethers.umd.min.js"></script>
+<style>
+:root{
+  --bg:#14151a; --panel:#1d1f26; --panel2:#262932; --line:#33363f;
+  --text:#e8e9ed; --sub:#9a9ca6; --accent:#5fd4a8; --accent2:#c86bd8;
+  --warn:#f0b54a; --bad:#ef6a6a; --good:#5fd4a8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;font-size:14px}
+header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header h1{font-size:17px;margin:0;margin-right:auto}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px}
+@media(max-width:900px){.wrap{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.card h2{font-size:15px;margin:0 0 12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.row > label{color:var(--sub);min-width:70px}
+input,select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:14px;min-width:0}
+input[type=number]{width:160px}
+input.addr{flex:1;min-width:200px;font-family:ui-monospace,monospace;font-size:12px}
+button{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:13px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:#0d1a14;border-color:var(--accent);font-weight:600}
+button.danger{border-color:var(--bad);color:var(--bad)}
+button:disabled{opacity:.45;cursor:not-allowed}
+.chip{font-size:12px;padding:3px 8px;border-radius:99px;background:var(--panel2);color:var(--sub)}
+.chip.on{background:rgba(95,212,168,.15);color:var(--good)}
+.chip.off{background:rgba(239,106,106,.15);color:var(--bad)}
+.sub{color:var(--sub);font-size:12px}
+.big{font-size:20px;font-weight:600}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+.kv div:nth-child(odd){color:var(--sub)}
+.pos{background:var(--panel2);border-radius:10px;padding:12px;margin-bottom:12px}
+.pos .head{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.pos .acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.panel{border-top:1px dashed var(--line);margin-top:10px;padding-top:10px}
+#log{font-family:ui-monospace,monospace;font-size:12px;max-height:180px;overflow:auto;white-space:pre-wrap;color:var(--sub)}
+#log a{color:var(--accent)}
+.full{grid-column:1/-1}
+.tab.on{background:var(--accent);color:#0d1a14;border-color:var(--accent);font-weight:600}
+.plist{max-height:360px;overflow:auto;border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+.prow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.prow:last-child{border-bottom:0}
+.prow:hover{background:var(--panel2)}
+.prow.sel{background:rgba(95,212,168,.10)}
+.prow .main{flex:1;min-width:0}
+.prow .apr{color:var(--good);font-weight:600;white-space:nowrap}
+.star{background:none;border:0;font-size:16px;color:var(--sub);padding:2px 6px}
+.star.on{color:var(--warn)}
+.warn{color:var(--warn)}
+.bad{color:var(--bad)}
+a{color:var(--accent)}
+</style>
+</head>
+<body>
+<header>
+  <h1>NBA 流動性管理 <span class="sub">Uniswap v3 / Robinhood Chain</span></h1>
+  <span id="netChip" class="chip">未接続</span>
+  <span id="acct" class="sub"></span>
+  <button id="btnConnect" class="primary">メタマスクに接続</button>
+</header>
+
+<div class="wrap">
+  <!-- 新しいポジション -->
+  <section class="card">
+    <h2>① ペアを選ぶ</h2>
+    <div class="row" id="pickTabs">
+      <button data-sort="vol" class="tab on">取引高順</button>
+      <button data-sort="apr" class="tab">APRが高い順</button>
+      <button data-sort="tvl" class="tab">流動性順</button>
+      <button data-sort="fav" class="tab">☆ お気に入り</button>
+    </div>
+    <div class="row">
+      <input id="pairQ" placeholder="トークン名・アドレスで検索（例：NVDA, Index）" style="flex:1">
+      <select id="minTvl"><option value="0">流動性 制限なし</option><option value="1000">$1千以上</option><option value="10000" selected>$1万以上</option><option value="100000">$10万以上</option></select>
+    </div>
+    <div id="pairList" class="plist"><div class="sub">読み込み中…</div></div>
+    <div class="row"><button id="btnMore">もっと読み込む</button><span id="pairMsg" class="sub"></span></div>
+    <div class="sub" style="margin-bottom:10px">推定APR＝24時間の取引高×手数料率÷流動性×365（全価格帯の平均。レンジを狭くすると上がり、外れると0）。一覧はUniswap v3のプールのみ。</div>
+    <details style="margin-bottom:10px"><summary class="sub" style="cursor:pointer">アドレスで指定する</summary>
+      <div class="row" style="margin-top:8px"><label>トークンA</label><input id="tokA" class="addr" placeholder="0x..."></div>
+      <div class="row"><label>トークンB</label><input id="tokB" class="addr" placeholder="0x..."></div>
+      <div class="row"><label>手数料</label>
+        <select id="feeSel"><option value="100">0.01%</option><option value="500">0.05%</option><option value="3000">0.3%</option><option value="10000" selected>1%</option></select>
+        <button id="btnLoadPool">このペアを使う</button>
+      </div>
+    </details>
+    <div class="sub" id="poolMsg"></div>
+    <div id="poolInfo" style="display:none">
+      <div class="row" style="margin-top:6px">
+        <span class="chip on">選択中</span><b id="pairName"></b><button id="btnFav" title="お気に入り">☆</button>
+      </div>
+      <div class="row">
+        <span class="big" id="priceTxt"></span>
+        <button id="btnInvert" title="価格の向きを入れ替え">⇄</button>
+      </div>
+      <div class="sub" id="poolSub"></div>
+    </div>
+
+    <div id="rangeBox" style="display:none">
+      <h2 style="margin-top:20px">② レンジ幅を決める</h2>
+      <div class="row">
+        <button data-pct="5">±5%</button><button data-pct="10">±10%</button><button data-pct="20">±20%</button>
+        <button data-pct="30">±30%</button><button data-pct="50">±50%</button><button data-pct="full">フルレンジ</button>
+      </div>
+      <div class="row"><label>下限</label><input id="minP" type="number" step="any"><span class="sub unitTxt"></span></div>
+      <div class="row"><label>上限</label><input id="maxP" type="number" step="any"><span class="sub unitTxt"></span></div>
+      <div class="sub" id="rangeInfo"></div>
+
+      <h2 style="margin-top:20px">③ 入れる額</h2>
+      <div class="row"><label id="lab0"></label><input id="amt0" type="number" step="any" min="0"><button class="maxBtn" data-i="0">最大</button><span class="sub" id="bal0"></span></div>
+      <div class="row"><label id="lab1"></label><input id="amt1" type="number" step="any" min="0"><button class="maxBtn" data-i="1">最大</button><span class="sub" id="bal1"></span></div>
+      <div class="row" id="ethPayRow" style="display:none"><label></label><label style="min-width:0;color:var(--text)"><input type="checkbox" id="payEth" checked> WETHの代わりにETHで支払う</label></div>
+      <div class="row"><label>許容ズレ</label><select id="slip"><option value="0.5">0.5%</option><option value="1" selected>1%</option><option value="2">2%</option><option value="5">5%</option></select></div>
+      <div class="row"><button id="btnMint" class="primary">流動性を追加（新規ポジション）</button></div>
+      <div class="sub">手数料はこのアプリでは一切取りません（ガス代のみ）。ポジションのNFTも手数料も、接続したウォレットに入ります。</div>
+    </div>
+  </section>
+
+  <!-- 自分のポジション -->
+  <section class="card">
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">自分のポジション</h2>
+      <div><label class="sub"><input type="checkbox" id="showClosed"> 閉じたものも表示</label> <button id="btnReload">リロード</button></div></div>
+    <div class="row" style="margin-top:6px">
+      <label>受け取り</label>
+      <label style="min-width:0;color:var(--text)"><input type="checkbox" id="recvEth" checked> WETHはETHに戻して受け取る</label>
+    </div>
+    <div id="posList" class="sub">メタマスクに接続すると表示されます。</div>
+    <div class="row" style="margin-top:16px"><label>番号で見る</label><input id="lookId" type="number" placeholder="例：1466328"><button id="btnLook">表示（見るだけ）</button></div>
+    <div id="lookBox"></div>
+  </section>
+
+  <section class="card full">
+    <h2>操作ログ</h2>
+    <div id="log"></div>
+  </section>
+</div>
+
+<script>
+const { ethers } = window;
+
+// ===== 設定（Robinhood Chain / Uniswap v3 公式アドレス） =====
+const CHAIN = {
+  id: 4663, hex: '0x1237', name: 'Robinhood Chain',
+  rpc: 'https://rpc.mainnet.chain.robinhood.com',
+  explorer: 'https://robinhoodchain.blockscout.com',
+};
+const NPM = '0x73991a25c818bf1f1128deaab1492d45638de0d3';
+const FACTORY = '0x1f7d7550b1b028f7571e69a784071f0205fd2efa';
+const WETH = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73';
+const DEFAULT_FAVS = [{ addr: '0xd29893ffac8b29ec4db2cfe0cdb3fe1377c028ff', name: 'Index / WETH 1%' }];
+// ペア一覧の取得元（GeckoTerminal 公開API・無料・1分30回まで）
+const GECKO = 'https://api.geckoterminal.com/api/v2';
+const GECKO_DEX = 'uniswap-v3-robinhood';
+const MAX128 = (1n << 128n) - 1n;
+const MIN_TICK = -887272, MAX_TICK = 887272;
+
+const NPM_ABI = [
+  'function positions(uint256) view returns (uint96 nonce,address operator,address token0,address token1,uint24 fee,int24 tickLower,int24 tickUpper,uint128 liquidity,uint256 fg0,uint256 fg1,uint128 tokensOwed0,uint128 tokensOwed1)',
+  'function balanceOf(address) view returns (uint256)',
+  'function ownerOf(uint256) view returns (address)',
+  'function tokenOfOwnerByIndex(address,uint256) view returns (uint256)',
+  'function mint((address token0,address token1,uint24 fee,int24 tickLower,int24 tickUpper,uint256 amount0Desired,uint256 amount1Desired,uint256 amount0Min,uint256 amount1Min,address recipient,uint256 deadline)) payable returns (uint256,uint128,uint256,uint256)',
+  'function increaseLiquidity((uint256 tokenId,uint256 amount0Desired,uint256 amount1Desired,uint256 amount0Min,uint256 amount1Min,uint256 deadline)) payable returns (uint128,uint256,uint256)',
+  'function decreaseLiquidity((uint256 tokenId,uint128 liquidity,uint256 amount0Min,uint256 amount1Min,uint256 deadline)) payable returns (uint256,uint256)',
+  'function collect((uint256 tokenId,address recipient,uint128 amount0Max,uint128 amount1Max)) payable returns (uint256 amount0,uint256 amount1)',
+  'function multicall(bytes[] data) payable returns (bytes[])',
+  'function refundETH() payable',
+  'function unwrapWETH9(uint256 amountMinimum,address recipient) payable',
+  'function sweepToken(address token,uint256 amountMinimum,address recipient) payable',
+];
+const FACTORY_ABI = ['function getPool(address,address,uint24) view returns (address)'];
+const POOL_ABI = [
+  'function slot0() view returns (uint160 sqrtPriceX96,int24 tick,uint16,uint16,uint16,uint8,bool)',
+  'function tickSpacing() view returns (int24)',
+  'function liquidity() view returns (uint128)',
+  'function token0() view returns (address)', 'function token1() view returns (address)', 'function fee() view returns (uint24)',
+];
+const ERC20_ABI = [
+  'function symbol() view returns (string)', 'function decimals() view returns (uint8)',
+  'function balanceOf(address) view returns (uint256)', 'function allowance(address,address) view returns (uint256)',
+  'function approve(address,uint256) returns (bool)',
+];
+
+const rpc = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: true });
+const npmR = new ethers.Contract(NPM, NPM_ABI, rpc);
+const factoryR = new ethers.Contract(FACTORY, FACTORY_ABI, rpc);
+const npmIface = new ethers.Interface(NPM_ABI);
+
+const S = { account: null, signer: null, pool: null, invert: false, tokenCache: {} };
+const $ = id => document.getElementById(id);
+
+// ===== 共通 =====
+function log(msg, hash) {
+  const t = new Date().toLocaleTimeString('ja-JP');
+  const el = document.createElement('div');
+  el.textContent = `[${t}] ${msg} `;
+  if (hash) { const a = document.createElement('a'); a.href = `${CHAIN.explorer}/tx/${hash}`; a.target = '_blank'; a.textContent = '取引を見る'; el.appendChild(a); }
+  $('log').prepend(el);
+}
+function errMsg(e) {
+  if (e?.code === 'ACTION_REJECTED' || e?.info?.error?.code === 4001) return 'メタマスクでキャンセルされました';
+  return e?.shortMessage || e?.reason || e?.message || String(e);
+}
+function fmt(x, d = 6) {
+  if (!isFinite(x)) return '∞';
+  if (x === 0) return '0';
+  const a = Math.abs(x);
+  if (a >= 1000) return x.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  if (a >= 1) return x.toLocaleString('en-US', { maximumFractionDigits: 4 });
+  return x.toPrecision(d).replace(/\.?0+$/, '');
+}
+// 外部から来る名前は記号を除いてから画面に出す（悪意あるトークン名対策）
+const clean = s => String(s).replace(/[<>&"'`]/g, '').slice(0, 60);
+const toNum = (big, dec) => Number(ethers.formatUnits(big, dec));
+const floorBig = x => (x > 0 && isFinite(x)) ? BigInt(Math.floor(x)) : 0n;
+const deadline = () => BigInt(Math.floor(Date.now() / 1000) + 20 * 60);
+const tickToRaw = t => Math.pow(1.0001, t);
+const sqrtAt = t => Math.pow(1.0001, t / 2);
+
+async function token(addr) {
+  const k = addr.toLowerCase();
+  if (!S.tokenCache[k]) {
+    const c = new ethers.Contract(addr, ERC20_ABI, rpc);
+    const [symbol, decimals] = await Promise.all([c.symbol(), c.decimals()]);
+    S.tokenCache[k] = { addr: ethers.getAddress(addr), symbol: clean(symbol), decimals: Number(decimals), isWeth: k === WETH.toLowerCase() };
+  }
+  return S.tokenCache[k];
+}
+
+// 流動性 → 各トークン量（生の単位、浮動小数）
+function amountsFromL(L, sqrtP, tl, tu) {
+  const sa = sqrtAt(tl), sb = sqrtAt(tu);
+  if (sqrtP <= sa) return [L * (sb - sa) / (sa * sb), 0];
+  if (sqrtP >= sb) return [0, L * (sb - sa)];
+  return [L * (sb - sqrtP) / (sqrtP * sb), L * (sqrtP - sa)];
+}
+
+// ===== ウォレット =====
+async function connect() {
+  if (!window.ethereum) { alert('メタマスクが見つかりません。Chromeにメタマスクを入れてください。'); return; }
+  try {
+    const bp = new ethers.BrowserProvider(window.ethereum);
+    await bp.send('eth_requestAccounts', []);
+    await ensureChain();
+    S.signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+    S.account = await S.signer.getAddress();
+    $('acct').textContent = S.account.slice(0, 6) + '…' + S.account.slice(-4);
+    $('btnConnect').textContent = '接続済み';
+    $('netChip').textContent = CHAIN.name; $('netChip').className = 'chip on';
+    log('接続しました ' + S.account);
+    if (S.pool) await refreshBalances();
+    await loadPositions();
+  } catch (e) { log('接続エラー: ' + errMsg(e)); }
+}
+async function ensureChain() {
+  const cur = await window.ethereum.request({ method: 'eth_chainId' });
+  if (parseInt(cur, 16) === CHAIN.id) return;
+  try {
+    await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: CHAIN.hex }] });
+  } catch (e) {
+    if (e.code === 4902 || e?.data?.originalError?.code === 4902) {
+      await window.ethereum.request({ method: 'wallet_addEthereumChain', params: [{
+        chainId: CHAIN.hex, chainName: CHAIN.name, rpcUrls: [CHAIN.rpc], blockExplorerUrls: [CHAIN.explorer],
+        nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } }] });
+    } else throw e;
+  }
+}
+async function signerReady() {
+  if (!S.signer) { await connect(); if (!S.signer) throw new Error('ウォレット未接続'); }
+  await ensureChain();
+  S.signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+  return S.signer;
+}
+async function sendTx(label, txPromise) {
+  const tx = await txPromise;
+  log(`${label}：送信しました。承認待ち…`, tx.hash);
+  const r = await tx.wait();
+  if (r.status !== 1) throw new Error('取引が失敗しました');
+  log(`${label}：完了`, tx.hash);
+  return r;
+}
+async function ensureAllowance(tok, amount) {
+  if (amount === 0n) return;
+  const c = new ethers.Contract(tok.addr, ERC20_ABI, S.signer);
+  const cur = await c.allowance(S.account, NPM);
+  if (cur >= amount) return;
+  await sendTx(`${tok.symbol} の使用許可`, c.approve(NPM, amount));
+}
+
+// ===== ペア一覧 =====
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+const L = { sort: 'vol', page: 0, pools: [], search: null, favs: store.get('nba.favs', DEFAULT_FAVS), busy: false };
+let geckoLast = 0;
+async function gecko(path) {
+  const wait = geckoLast + 2100 - Date.now(); // 回数制限よけ：2.1秒あける
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  geckoLast = Date.now();
+  // 回数制限に当たると 429（CORSなしで Failed to fetch になることも）→ 待って2回までやり直す
+  for (let i = 0; ; i++) {
+    let r = null;
+    try { r = await fetch(GECKO + path, { headers: { accept: 'application/json' } }); } catch {}
+    if (r?.ok) return r.json();
+    if (i >= 2) throw new Error('一覧の取得に失敗しました（回数制限）。1分ほど待ってから「もっと読み込む」を押してください。');
+    await new Promise(res => setTimeout(res, 15000 * (i + 1)));
+    geckoLast = Date.now();
+  }
+}
+function geckoPools(json) {
+  return (json.data || []).filter(x => x.relationships?.dex?.data?.id === GECKO_DEX).map(x => {
+    const a = x.attributes, m = a.name.match(/([\d.]+)%\s*$/);
+    const fee = m ? Number(m[1]) : null, tvl = Number(a.reserve_in_usd) || 0, vol = Number(a.volume_usd?.h24) || 0;
+    return { addr: a.address.toLowerCase(), name: clean(a.name), fee, tvl, vol, apr: fee && tvl > 0 ? vol * fee / tvl * 365 : 0 };
+  });
+}
+const usd = x => x >= 1e6 ? `$${(x / 1e6).toFixed(2)}M` : x >= 1e3 ? `$${(x / 1e3).toFixed(1)}K` : `$${x.toFixed(0)}`;
+const isFav = addr => L.favs.some(f => f.addr === addr.toLowerCase());
+function toggleFav(addr, name) {
+  addr = addr.toLowerCase();
+  L.favs = isFav(addr) ? L.favs.filter(f => f.addr !== addr) : [...L.favs, { addr, name }];
+  store.set('nba.favs', L.favs);
+  renderPairs(); if (S.pool) $('btnFav').textContent = isFav(S.pool.addr) ? '★' : '☆';
+}
+async function loadMorePairs() {
+  if (L.busy || L.page >= 10) return;
+  L.busy = true; if (!L.search) $('pairMsg').textContent = '読み込み中…';
+  try {
+    const j = await gecko(`/networks/robinhood/dexes/${GECKO_DEX}/pools?page=${L.page + 1}&sort=h24_volume_usd_desc`);
+    L.page++;
+    const seen = new Set(L.pools.map(p => p.addr));
+    L.pools.push(...geckoPools(j).filter(p => !seen.has(p.addr)));
+    if (!L.search) $('pairMsg').textContent = `${L.pools.length}件（取引高の多い順に取得）`;
+  } catch (e) { $('pairMsg').textContent = errMsg(e); }
+  L.busy = false; renderPairs();
+}
+async function searchPairs(q) {
+  q = q.trim();
+  if (!q) { L.search = null; renderPairs(); return; }
+  $('pairMsg').textContent = '検索中…';
+  try {
+    const j = ethers.isAddress(q)
+      ? await gecko(`/networks/robinhood/tokens/${q.toLowerCase()}/pools?page=1`)
+      : await gecko(`/search/pools?query=${encodeURIComponent(q)}&network=robinhood`);
+    if ($('pairQ').value.trim() !== q) return; // 入力が変わっていたら捨てる
+    L.search = geckoPools(j);
+    $('pairMsg').textContent = `「${q}」の検索結果 ${L.search.length}件`;
+  } catch (e) { $('pairMsg').textContent = errMsg(e); }
+  renderPairs();
+}
+function renderPairs() {
+  const min = Number($('minTvl').value);
+  let list;
+  if (L.sort === 'fav') {
+    const known = Object.fromEntries([...L.pools, ...(L.search || [])].map(p => [p.addr, p]));
+    list = L.favs.map(f => known[f.addr] || { addr: f.addr, name: f.name, tvl: null });
+  } else {
+    list = (L.search || L.pools).filter(p => p.tvl >= min);
+    const key = { vol: 'vol', apr: 'apr', tvl: 'tvl' }[L.sort];
+    list = [...list].sort((a, b) => b[key] - a[key]);
+  }
+  $('btnMore').style.display = (L.sort === 'fav' || L.search) ? 'none' : '';
+  if (!list.length) { $('pairList').innerHTML = `<div class="sub" style="padding:12px">${L.sort === 'fav' ? 'お気に入りはまだありません（☆で追加）' : '該当するペアがありません'}</div>`; return; }
+  const sel = S.pool?.addr?.toLowerCase();
+  $('pairList').innerHTML = list.map(p => `<div class="prow ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}">
+      <div class="main"><b>${p.name}</b><div class="sub">${p.tvl == null ? 'お気に入り' : `流動性 ${usd(p.tvl)}・24h取引高 ${usd(p.vol)}`}</div></div>
+      ${p.tvl == null ? '' : `<span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(1)) + '%' : '-'}</span>`}
+      <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button>
+    </div>`).join('');
+}
+
+// ===== プール =====
+// 一覧から選んだプール：中身はチェーンから読み、Uniswap v3 公式のプールか確かめる
+async function selectPoolAddr(addr) {
+  $('poolMsg').textContent = '読み込み中…';
+  try {
+    const c = new ethers.Contract(addr, POOL_ABI, rpc);
+    const [a, b, fee] = await Promise.all([c.token0(), c.token1(), c.fee()]);
+    await loadPool(a, b, Number(fee), addr);
+  } catch (e) { $('poolMsg').textContent = 'このプールは使えません（Uniswap v3 ではない可能性）'; }
+}
+async function loadPool(a, b, fee, expectAddr) {
+  $('poolMsg').textContent = '読み込み中…';
+  try {
+    if (!ethers.isAddress(a) || !ethers.isAddress(b)) throw new Error('トークンのアドレスが正しくありません');
+    const [t0a, t1a] = a.toLowerCase() < b.toLowerCase() ? [a, b] : [b, a];
+    const addr = await factoryR.getPool(t0a, t1a, fee);
+    if (addr === ethers.ZeroAddress) throw new Error('このペア・手数料のプールはまだありません');
+    if (expectAddr && addr.toLowerCase() !== expectAddr.toLowerCase()) throw new Error('Uniswap v3 公式のプールではありません');
+    const [t0, t1] = await Promise.all([token(t0a), token(t1a)]);
+    const pool = new ethers.Contract(addr, POOL_ABI, rpc);
+    const [s0, spacing] = await Promise.all([pool.slot0(), pool.tickSpacing()]);
+    S.pool = { addr, fee, t0, t1, spacing: Number(spacing), sqrtP: Number(s0.sqrtPriceX96) / 2 ** 96, tick: Number(s0.tick) };
+    const stable = t => /^(USDG|USDC|USDT|DAI|USDe|PYUSD)$/i.test(t.symbol);
+    S.invert = stable(t0) && !stable(t1); // ドル建てが単位側に来るように
+    S.lastEdited = 0; $('amt0').value = ''; $('amt1').value = '';
+    $('poolMsg').textContent = '';
+    $('pairName').textContent = `${t0.symbol} / ${t1.symbol}　${fee / 10000}%`;
+    $('btnFav').textContent = isFav(addr) ? '★' : '☆';
+    renderPairs();
+    $('poolInfo').style.display = ''; $('rangeBox').style.display = '';
+    $('lab0').textContent = t0.symbol; $('lab1').textContent = t1.symbol;
+    $('ethPayRow').style.display = (t0.isWeth || t1.isWeth) ? '' : 'none';
+    renderPrice();
+    setRangePct(20);
+    await refreshBalances();
+  } catch (e) { $('poolMsg').textContent = errMsg(e); }
+}
+// 人が見る価格（1 t0 = ? t1）
+function humanPrice(rawP, pool = S.pool) { return rawP * Math.pow(10, pool.t0.decimals - pool.t1.decimals); }
+function rawFromHuman(h, pool = S.pool) { return h / Math.pow(10, pool.t0.decimals - pool.t1.decimals); }
+const disp = h => S.invert ? 1 / h : h;
+function renderPrice() {
+  const P = S.pool, h = humanPrice(P.sqrtP ** 2);
+  const [base, quote] = S.invert ? [P.t1, P.t0] : [P.t0, P.t1];
+  $('priceTxt').textContent = `1 ${base.symbol} = ${fmt(disp(h))} ${quote.symbol}`;
+  $('poolSub').textContent = `プール ${P.addr.slice(0, 10)}…　手数料 ${P.fee / 10000}%　ティック間隔 ${P.spacing}`;
+  document.querySelectorAll('.unitTxt').forEach(el => el.textContent = `${quote.symbol} / ${base.symbol}`);
+}
+function setRangePct(pct) {
+  const P = S.pool;
+  if (pct === 'full') { S.full = true; $('minP').value = ''; $('maxP').value = ''; updateRange(); return; }
+  S.full = false;
+  const cur = disp(humanPrice(P.sqrtP ** 2));
+  $('minP').value = Number((cur * (1 - pct / 100)).toPrecision(6));
+  $('maxP').value = Number((cur * (1 + pct / 100)).toPrecision(6));
+  updateRange();
+}
+function getTicks() {
+  const P = S.pool, sp = P.spacing;
+  const lo = Math.ceil(MIN_TICK / sp) * sp, hi = Math.floor(MAX_TICK / sp) * sp;
+  if (S.full) return [lo, hi];
+  let a = Number($('minP').value), b = Number($('maxP').value);
+  if (!(a > 0) || !(b > 0) || a >= b) return null;
+  if (S.invert) [a, b] = [1 / b, 1 / a];
+  const tick = h => Math.log(rawFromHuman(h)) / Math.log(1.0001);
+  let tl = Math.floor(tick(a) / sp) * sp, tu = Math.ceil(tick(b) / sp) * sp;
+  tl = Math.max(tl, lo); tu = Math.min(tu, hi);
+  if (tu <= tl) tu = tl + sp;
+  return [tl, tu];
+}
+function updateRange() {
+  const T = getTicks();
+  if (!T) { $('rangeInfo').innerHTML = '<span class="bad">下限 &lt; 上限 で入力してください</span>'; return; }
+  const P = S.pool, [tl, tu] = T;
+  const pl = disp(humanPrice(tickToRaw(tl))), pu = disp(humanPrice(tickToRaw(tu)));
+  const [mn, mx] = pl < pu ? [pl, pu] : [pu, pl];
+  let st = '';
+  if (P.tick < tl || P.tick >= tu) st = '<span class="warn">今の価格はレンジ外です（片方のトークンだけ入ります・手数料は入りません）</span>';
+  $('rangeInfo').innerHTML = S.full ? 'フルレンジ（全価格帯）' :
+    `実際のレンジ：${fmt(mn)} 〜 ${fmt(mx)}（ティック ${tl} 〜 ${tu}）<br>${st}`;
+  const sqrtP = P.sqrtP;
+  $('amt0').disabled = sqrtP >= sqrtAt(tu);
+  $('amt1').disabled = sqrtP <= sqrtAt(tl);
+  if ($('amt0').disabled) $('amt0').value = '';
+  if ($('amt1').disabled) $('amt1').value = '';
+  syncAmounts(S.lastEdited ?? 0);
+}
+// 片方を入れたらもう片方を計算
+function syncAmounts(i) {
+  const T = getTicks(); if (!T) return;
+  const P = S.pool, [tl, tu] = T, sqrtP = P.sqrtP, sa = sqrtAt(tl), sb = sqrtAt(tu);
+  if (sqrtP <= sa || sqrtP >= sb) return;
+  const k = 10 ** (P.t0.decimals - P.t1.decimals); // 生 → 人の単位の換算
+  const ratio = (sqrtP - sa) * sqrtP * sb / (sb - sqrtP); // amount1raw / amount0raw
+  if (i === 0) {
+    const v = Number($('amt0').value);
+    $('amt1').value = v > 0 ? Number((v * ratio * k).toPrecision(10)) : '';
+  } else {
+    const v = Number($('amt1').value);
+    $('amt0').value = v > 0 ? Number((v / ratio / k).toPrecision(10)) : '';
+  }
+}
+async function refreshBalances() {
+  if (!S.account || !S.pool) return;
+  const P = S.pool;
+  const bal = async t => {
+    const c = new ethers.Contract(t.addr, ERC20_ABI, rpc);
+    const b = await c.balanceOf(S.account);
+    const eth = t.isWeth ? await rpc.getBalance(S.account) : 0n;
+    return { erc: b, eth };
+  };
+  const [b0, b1] = await Promise.all([bal(P.t0), bal(P.t1)]);
+  S.bal = [b0, b1];
+  const show = (t, b) => `残高 ${fmt(toNum(b.erc, t.decimals))}` + (t.isWeth ? `（ETH ${fmt(toNum(b.eth, 18))}）` : '');
+  $('bal0').textContent = show(P.t0, b0); $('bal1').textContent = show(P.t1, b1);
+}
+function maxAmount(i) {
+  if (!S.bal) return;
+  const t = i === 0 ? S.pool.t0 : S.pool.t1, b = S.bal[i];
+  let v = b.erc;
+  if (t.isWeth && $('payEth').checked) v = b.eth > 10n ** 15n ? b.eth - 10n ** 15n : 0n; // ガス代分 0.001ETH 残す
+  $('amt' + i).value = ethers.formatUnits(v, t.decimals);
+  S.lastEdited = i; syncAmounts(i);
+}
+
+// 入れる額 → BigInt（片方は入力値、もう片方は計算値）
+function desiredAmounts(P, inp0, inp1) {
+  const toBig = (s, dec) => {
+    s = String(s || '').trim(); if (!s || !(Number(s) > 0)) return 0n;
+    if (!/^\d*\.?\d*$/.test(s)) s = Number(s).toFixed(dec); // 指数表記のときだけ数値経由
+    const [i, f = ''] = s.split('.');
+    return ethers.parseUnits(`${i || '0'}.${f.slice(0, dec) || '0'}`, dec); // 桁あふれは切り捨て
+  };
+  return [toBig(inp0, P.t0.decimals), toBig(inp1, P.t1.decimals)];
+}
+function withSlip(x, slipPct) { return x * BigInt(Math.round((100 - slipPct) * 100)) / 10000n; }
+
+// ETH払いのとき：WETH分をvalueで送り、multicall(mint/increase, refundETH)
+function ethPlan(P, a0, a1, payEth) {
+  if (!payEth) return { value: 0n, wethSide: -1 };
+  if (P.t0.isWeth) return { value: a0, wethSide: 0 };
+  if (P.t1.isWeth) return { value: a1, wethSide: 1 };
+  return { value: 0n, wethSide: -1 };
+}
+
+async function mint() {
+  const btn = $('btnMint'); btn.disabled = true;
+  try {
+    await signerReady();
+    const P = S.pool, T = getTicks();
+    if (!T) throw new Error('レンジを正しく入力してください');
+    const [a0, a1] = desiredAmounts(P, $('amt0').value, $('amt1').value);
+    if (a0 === 0n && a1 === 0n) throw new Error('入れる額を入力してください');
+    const slip = Number($('slip').value);
+    const ep = ethPlan(P, a0, a1, $('payEth').checked && $('ethPayRow').style.display !== 'none');
+    if (ep.wethSide !== 0) await ensureAllowance(P.t0, a0);
+    if (ep.wethSide !== 1) await ensureAllowance(P.t1, a1);
+    const params = { token0: P.t0.addr, token1: P.t1.addr, fee: P.fee, tickLower: T[0], tickUpper: T[1],
+      amount0Desired: a0, amount1Desired: a1, amount0Min: withSlip(a0, slip), amount1Min: withSlip(a1, slip),
+      recipient: S.account, deadline: deadline() };
+    const npm = new ethers.Contract(NPM, NPM_ABI, S.signer);
+    const calls = [npmIface.encodeFunctionData('mint', [params])];
+    if (ep.value > 0n) calls.push(npmIface.encodeFunctionData('refundETH', []));
+    await sendTx('新規ポジション作成', npm.multicall(calls, { value: ep.value }));
+    await Promise.all([refreshBalances(), loadPositions()]);
+  } catch (e) { log('作成エラー: ' + errMsg(e)); }
+  finally { btn.disabled = false; }
+}
+
+// ===== ポジション =====
+async function readPosition(id) {
+  const p = await npmR.positions(id);
+  const [t0, t1] = await Promise.all([token(p.token0), token(p.token1)]);
+  const poolAddr = await factoryR.getPool(p.token0, p.token1, p.fee);
+  const s0 = await new ethers.Contract(poolAddr, POOL_ABI, rpc).slot0();
+  const pos = { id: BigInt(id), t0, t1, fee: Number(p.fee), tl: Number(p.tickLower), tu: Number(p.tickUpper),
+    L: p.liquidity, sqrtP: Number(s0.sqrtPriceX96) / 2 ** 96, tick: Number(s0.tick), owed: [p.tokensOwed0, p.tokensOwed1] };
+  const [r0, r1] = amountsFromL(Number(pos.L), pos.sqrtP, pos.tl, pos.tu);
+  pos.amt = [r0, r1];
+  // 未回収の手数料（所有者として collect を試算）
+  try {
+    const owner = await npmR.ownerOf(id);
+    pos.owner = owner;
+    const f = await npmR.collect.staticCall({ tokenId: id, recipient: owner, amount0Max: MAX128, amount1Max: MAX128 }, { from: owner });
+    pos.fees = [f.amount0, f.amount1];
+  } catch { pos.fees = pos.owed; }
+  return pos;
+}
+function posHTML(pos, mine) {
+  const pool = { t0: pos.t0, t1: pos.t1 };
+  const inRange = pos.tick >= pos.tl && pos.tick < pos.tu;
+  const closed = pos.L === 0n;
+  const pl = humanPrice(tickToRaw(pos.tl), pool), pu = humanPrice(tickToRaw(pos.tu), pool), pc = humanPrice(pos.sqrtP ** 2, pool);
+  const a0 = pos.amt[0] / 10 ** pos.t0.decimals, a1 = pos.amt[1] / 10 ** pos.t1.decimals;
+  const f0 = toNum(pos.fees[0], pos.t0.decimals), f1 = toNum(pos.fees[1], pos.t1.decimals);
+  const val = a0 + a1 / pc, fval = f0 + f1 / pc;
+  const chip = closed ? '<span class="chip">閉じています</span>' : inRange ? '<span class="chip on">レンジ内</span>' : '<span class="chip off">レンジ外</span>';
+  return `<div class="pos" data-id="${pos.id}">
+    <div class="head"><b>#${pos.id}</b><span>${pos.t0.symbol} / ${pos.t1.symbol}</span><span class="chip">${pos.fee / 10000}%</span>${chip}
+      <a class="sub" href="https://app.uniswap.org/positions/v3/robinhood/${pos.id}" target="_blank">Uniswapで見る</a></div>
+    <div class="kv">
+      <div>レンジ</div><div>${fmt(pl)} 〜 ${fmt(pu)} ${pos.t1.symbol}/${pos.t0.symbol}（今 ${fmt(pc)}）</div>
+      <div>入っている量</div><div>${fmt(a0)} ${pos.t0.symbol} ＋ ${fmt(a1)} ${pos.t1.symbol}</div>
+      <div>評価額</div><div>約 ${fmt(val)} ${pos.t0.symbol} 相当</div>
+      <div>未回収の手数料</div><div><b>${fmt(f0)} ${pos.t0.symbol} ＋ ${fmt(f1)} ${pos.t1.symbol}</b>（約 ${fmt(fval)} ${pos.t0.symbol}）</div>
+      ${mine ? '' : `<div>持ち主</div><div class="sub">${pos.owner || '-'}</div>`}
+    </div>
+    ${mine ? `<div class="acts">
+      <button data-act="collect">手数料を回収</button>
+      <button data-act="add" ${closed ? 'disabled' : ''}>流動性を追加</button>
+      <button data-act="remove" ${closed ? 'disabled' : ''}>一部を引き出す</button>
+      <button data-act="close" class="danger" ${closed ? 'disabled' : ''}>閉じて全額回収</button>
+    </div><div class="panelBox"></div>` : ''}
+  </div>`;
+}
+async function loadPositions() {
+  if (!S.account) return;
+  $('posList').textContent = '読み込み中…';
+  try {
+    const n = Number(await npmR.balanceOf(S.account));
+    const ids = await Promise.all([...Array(n).keys()].map(i => npmR.tokenOfOwnerByIndex(S.account, i)));
+    const all = await Promise.all(ids.map(readPosition));
+    S.positions = Object.fromEntries(all.map(p => [String(p.id), p]));
+    const list = all.filter(p => $('showClosed').checked || p.L > 0n || p.fees[0] > 0n || p.fees[1] > 0n).sort((a, b) => Number(b.id - a.id));
+    $('posList').innerHTML = list.length ? list.map(p => posHTML(p, true)).join('') : 'このウォレットのポジションはまだありません。';
+  } catch (e) { $('posList').textContent = '読み込みエラー: ' + errMsg(e); }
+}
+
+// 受け取り：WETHをETHに戻す場合は collect先をNPMにして unwrap＋sweep
+function collectCalls(pos, extraFirst = []) {
+  const recvEth = $('recvEth').checked && (pos.t0.isWeth || pos.t1.isWeth);
+  const calls = [...extraFirst];
+  calls.push(npmIface.encodeFunctionData('collect', [{ tokenId: pos.id, recipient: recvEth ? ethers.ZeroAddress : S.account, amount0Max: MAX128, amount1Max: MAX128 }]));
+  if (recvEth) {
+    const other = pos.t0.isWeth ? pos.t1 : pos.t0;
+    calls.push(npmIface.encodeFunctionData('unwrapWETH9', [0n, S.account]));
+    calls.push(npmIface.encodeFunctionData('sweepToken', [other.addr, 0n, S.account]));
+  }
+  return calls;
+}
+async function doCollect(pos) {
+  await signerReady();
+  const npm = new ethers.Contract(NPM, NPM_ABI, S.signer);
+  await sendTx(`#${pos.id} 手数料回収`, npm.multicall(collectCalls(pos)));
+}
+async function doDecrease(pos, pct) {
+  await signerReady();
+  const slip = Number($('slip').value);
+  const liq = pos.L * BigInt(pct) / 100n;
+  const [e0, e1] = amountsFromL(Number(liq), pos.sqrtP, pos.tl, pos.tu);
+  const dec = npmIface.encodeFunctionData('decreaseLiquidity', [{ tokenId: pos.id, liquidity: liq,
+    amount0Min: withSlip(floorBig(e0), slip), amount1Min: withSlip(floorBig(e1), slip), deadline: deadline() }]);
+  const npm = new ethers.Contract(NPM, NPM_ABI, S.signer);
+  await sendTx(`#${pos.id} ${pct}% 引き出し`, npm.multicall(collectCalls(pos, [dec])));
+}
+async function doIncrease(pos, in0, in1) {
+  await signerReady();
+  const pool = { t0: pos.t0, t1: pos.t1 };
+  const [a0, a1] = desiredAmounts(pool, in0, in1);
+  if (a0 === 0n && a1 === 0n) throw new Error('額を入力してください');
+  const slip = Number($('slip').value);
+  const ep = ethPlan(pool, a0, a1, $('payEth').checked);
+  if (ep.wethSide !== 0) await ensureAllowance(pos.t0, a0);
+  if (ep.wethSide !== 1) await ensureAllowance(pos.t1, a1);
+  const calls = [npmIface.encodeFunctionData('increaseLiquidity', [{ tokenId: pos.id, amount0Desired: a0, amount1Desired: a1,
+    amount0Min: withSlip(a0, slip), amount1Min: withSlip(a1, slip), deadline: deadline() }])];
+  if (ep.value > 0n) calls.push(npmIface.encodeFunctionData('refundETH', []));
+  const npm = new ethers.Contract(NPM, NPM_ABI, S.signer);
+  await sendTx(`#${pos.id} 流動性追加`, npm.multicall(calls, { value: ep.value }));
+}
+function openPanel(card, pos, act) {
+  const box = card.querySelector('.panelBox');
+  if (act === 'remove') {
+    box.innerHTML = `<div class="panel"><div class="row"><label>引き出す割合</label>
+      <select class="pct"><option>25</option><option selected>50</option><option>75</option><option>100</option></select>%
+      <button class="primary go">引き出す（手数料も回収）</button><button class="cancel">やめる</button></div></div>`;
+    box.querySelector('.go').onclick = () => run(card, () => doDecrease(pos, Number(box.querySelector('.pct').value)));
+  } else if (act === 'add') {
+    const sa = sqrtAt(pos.tl), sb = sqrtAt(pos.tu), sp = pos.sqrtP;
+    const k = 10 ** (pos.t0.decimals - pos.t1.decimals);
+    const ratio = (sp > sa && sp < sb) ? (sp - sa) * sp * sb / (sb - sp) : null;
+    box.innerHTML = `<div class="panel">
+      <div class="row"><label>${pos.t0.symbol}</label><input class="i0" type="number" step="any" ${sp >= sb ? 'disabled' : ''}></div>
+      <div class="row"><label>${pos.t1.symbol}</label><input class="i1" type="number" step="any" ${sp <= sa ? 'disabled' : ''}></div>
+      <div class="sub">WETHのペアは、左の「ETHで支払う」の設定に従います。</div>
+      <div class="row"><button class="primary go">追加する</button><button class="cancel">やめる</button></div></div>`;
+    const i0 = box.querySelector('.i0'), i1 = box.querySelector('.i1');
+    if (ratio) {
+      i0.oninput = () => { const v = Number(i0.value); i1.value = v > 0 ? Number((v * ratio * k).toPrecision(10)) : ''; };
+      i1.oninput = () => { const v = Number(i1.value); i0.value = v > 0 ? Number((v / ratio / k).toPrecision(10)) : ''; };
+    }
+    box.querySelector('.go').onclick = () => run(card, () => doIncrease(pos, i0.value, i1.value));
+  } else if (act === 'close') {
+    box.innerHTML = `<div class="panel"><div class="row"><span>全額と手数料をウォレットに戻します。よろしいですか？</span>
+      <button class="danger go">閉じる</button><button class="cancel">やめる</button></div></div>`;
+    box.querySelector('.go').onclick = () => run(card, () => doDecrease(pos, 100));
+  }
+  box.querySelector('.cancel').onclick = () => box.innerHTML = '';
+}
+async function run(card, fn) {
+  card.querySelectorAll('button').forEach(b => b.disabled = true);
+  try { await fn(); } catch (e) { log('エラー: ' + errMsg(e)); }
+  await Promise.all([loadPositions(), refreshBalances()]);
+}
+
+// ===== イベント =====
+$('btnConnect').onclick = connect;
+$('btnLoadPool').onclick = () => loadPool($('tokA').value.trim(), $('tokB').value.trim(), Number($('feeSel').value));
+document.querySelectorAll('#pickTabs .tab').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#pickTabs .tab').forEach(x => x.classList.toggle('on', x === b));
+  L.sort = b.dataset.sort; renderPairs();
+});
+let qTimer;
+$('pairQ').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(() => searchPairs($('pairQ').value), 700); };
+$('minTvl').onchange = renderPairs;
+$('btnMore').onclick = loadMorePairs;
+$('pairList').onclick = e => {
+  const row = e.target.closest('.prow'); if (!row) return;
+  if (e.target.closest('[data-star]')) { toggleFav(row.dataset.addr, row.dataset.name); return; }
+  selectPoolAddr(row.dataset.addr);
+};
+$('btnFav').onclick = () => S.pool && toggleFav(S.pool.addr, $('pairName').textContent);
+$('btnInvert').onclick = () => {
+  S.invert = !S.invert;
+  const a = Number($('minP').value), b = Number($('maxP').value);
+  if (a > 0 && b > 0) { $('minP').value = Number((1 / b).toPrecision(6)); $('maxP').value = Number((1 / a).toPrecision(6)); }
+  renderPrice(); updateRange();
+};
+document.querySelectorAll('[data-pct]').forEach(b => b.onclick = () => setRangePct(b.dataset.pct === 'full' ? 'full' : Number(b.dataset.pct)));
+$('minP').oninput = $('maxP').oninput = () => { S.full = false; updateRange(); };
+$('amt0').oninput = () => { S.lastEdited = 0; syncAmounts(0); };
+$('amt1').oninput = () => { S.lastEdited = 1; syncAmounts(1); };
+document.querySelectorAll('.maxBtn').forEach(b => b.onclick = () => maxAmount(Number(b.dataset.i)));
+$('payEth').onchange = () => { refreshBalances(); };
+$('btnMint').onclick = mint;
+$('btnReload').onclick = () => { loadPositions(); refreshBalances(); };
+$('showClosed').onchange = loadPositions;
+$('posList').onclick = e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  const card = b.closest('.pos'), pos = S.positions[card.dataset.id];
+  if (b.dataset.act === 'collect') run(card, () => doCollect(pos));
+  else openPanel(card, pos, b.dataset.act);
+};
+$('btnLook').onclick = async () => {
+  const id = $('lookId').value.trim(); if (!id) return;
+  $('lookBox').innerHTML = '<div class="sub">読み込み中…</div>';
+  try { $('lookBox').innerHTML = posHTML(await readPosition(id), false); }
+  catch (e) { $('lookBox').innerHTML = `<div class="bad">${errMsg(e)}</div>`; }
+};
+if (window.ethereum) {
+  window.ethereum.on?.('accountsChanged', () => { S.signer = null; connect(); });
+  window.ethereum.on?.('chainChanged', () => location.reload());
+}
+selectPoolAddr((L.favs[0] || DEFAULT_FAVS[0]).addr);
+(async () => { for (let i = 0; i < 3; i++) await loadMorePairs(); })(); // 最初は60件
+</script>
+</body>
+</html>
