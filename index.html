@@ -53,6 +53,7 @@ button:disabled{opacity:.45;cursor:not-allowed}
 .prow .apr{color:var(--good);font-weight:600;white-space:nowrap}
 .star{background:none;border:0;font-size:16px;color:var(--sub);padding:2px 6px}
 .star.on{color:var(--warn)}
+.swapBox{background:var(--panel2);border-radius:10px;padding:12px;margin:10px 0}
 .warn{color:var(--warn)}
 .bad{color:var(--bad)}
 a{color:var(--accent)}
@@ -118,6 +119,15 @@ a{color:var(--accent)}
       <div class="row"><label id="lab0"></label><input id="amt0" type="number" step="any" min="0"><button class="maxBtn" data-i="0">最大</button><span class="sub" id="bal0"></span></div>
       <div class="row"><label id="lab1"></label><input id="amt1" type="number" step="any" min="0"><button class="maxBtn" data-i="1">最大</button><span class="sub" id="bal1"></span></div>
       <div class="row" id="ethPayRow" style="display:none"><label></label><label style="min-width:0;color:var(--text)"><input type="checkbox" id="payEth" checked> WETHの代わりにETHで支払う</label></div>
+      <div class="swapBox">
+        <div class="row" style="margin-bottom:6px"><b>比率をそろえる（スワップ）</b></div>
+        <div class="sub" style="margin-bottom:8px">手持ちを、このレンジに必要な比率に交換します。片方しか持っていないとき、レンジを作り直すときに使います。</div>
+        <div class="row"><label id="slab0"></label><input id="use0" type="number" step="any" min="0"><span class="sub">使う量</span></div>
+        <div class="row"><label id="slab1"></label><input id="use1" type="number" step="any" min="0"><span class="sub">使う量</span></div>
+        <div class="row"><button id="btnUseBal">残高を入れる</button><button id="btnQuote">見積もり</button></div>
+        <div id="swapInfo" class="sub"></div>
+        <div class="row" id="swapGoRow" style="display:none;margin-top:8px"><button id="btnSwap" class="primary">交換する</button></div>
+      </div>
       <div class="row"><label>許容ズレ</label><select id="slip"><option value="0.5">0.5%</option><option value="1" selected>1%</option><option value="2">2%</option><option value="5">5%</option></select></div>
       <div class="row"><button id="btnMint" class="primary">流動性を追加（新規ポジション）</button></div>
       <div class="sub">手数料はこのアプリでは一切取りません（ガス代のみ）。ポジションのNFTも手数料も、接続したウォレットに入ります。</div>
@@ -197,6 +207,13 @@ const NPM_ABI = [
   'function sweepToken(address token,uint256 amountMinimum,address recipient) payable',
 ];
 const FACTORY_ABI = ['function getPool(address,address,uint24) view returns (address)'];
+const ROUTER_ABI = [
+  'function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns (uint256 amountOut)',
+  'function multicall(uint256 deadline,bytes[] data) payable returns (bytes[])',
+  'function unwrapWETH9(uint256 amountMinimum,address recipient) payable',
+];
+const QUOTER_ABI = ['function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns (uint256 amountOut,uint160 sqrtPriceX96After,uint32 initializedTicksCrossed,uint256 gasEstimate)'];
+const ROUTER_THIS = '0x0000000000000000000000000000000000000002'; // SwapRouter02 の「ルーター自身」宛て
 const POOL_ABI = [
   'function slot0() view returns (uint160 sqrtPriceX96,int24 tick,uint16,uint16,uint16,uint8,bool)',
   'function tickSpacing() view returns (int24)',
@@ -213,6 +230,8 @@ const rpc = new ethers.JsonRpcProvider(CHAIN.rpc, CHAIN.id, { staticNetwork: tru
 const npmR = new ethers.Contract(NPM, NPM_ABI, rpc);
 const factoryR = new ethers.Contract(FACTORY, FACTORY_ABI, rpc);
 const npmIface = new ethers.Interface(NPM_ABI);
+const routerIface = new ethers.Interface(ROUTER_ABI);
+const quoterR = new ethers.Contract(CHAIN.quoter, QUOTER_ABI, rpc);
 
 const S = { account: null, signer: null, pool: null, invert: false, tokenCache: {} };
 const $ = id => document.getElementById(id);
@@ -307,12 +326,12 @@ async function sendTx(label, txPromise) {
   log(`${label}：完了`, tx.hash);
   return r;
 }
-async function ensureAllowance(tok, amount) {
+async function ensureAllowance(tok, amount, spender = NPM) {
   if (amount === 0n) return;
   const c = new ethers.Contract(tok.addr, ERC20_ABI, S.signer);
-  const cur = await c.allowance(S.account, NPM);
+  const cur = await c.allowance(S.account, spender);
   if (cur >= amount) return;
-  await sendTx(`${tok.symbol} の使用許可`, c.approve(NPM, amount));
+  await sendTx(`${tok.symbol} の使用許可`, c.approve(spender, amount));
 }
 
 // ===== ペア一覧 =====
@@ -428,7 +447,8 @@ async function loadPool(a, b, fee, expectAddr) {
     $('btnFav').textContent = isFav(addr) ? '★' : '☆';
     renderPairs();
     $('poolInfo').style.display = ''; $('rangeBox').style.display = '';
-    $('lab0').textContent = t0.symbol; $('lab1').textContent = t1.symbol;
+    $('lab0').textContent = $('slab0').textContent = t0.symbol; $('lab1').textContent = $('slab1').textContent = t1.symbol;
+    $('use0').value = $('use1').value = ''; $('swapInfo').textContent = ''; $('swapGoRow').style.display = 'none'; S.swapPlan = null;
     $('ethPayRow').style.display = (t0.isWeth || t1.isWeth) ? '' : 'none';
     renderPrice();
     setRangePct(20);
@@ -514,6 +534,91 @@ async function refreshBalances() {
   const show = (t, b) => `残高 ${fmt(toNum(b.erc, t.decimals))}` + (t.isWeth ? `（ETH ${fmt(toNum(b.eth, 18))}）` : '');
   $('bal0').textContent = show(P.t0, b0); $('bal1').textContent = show(P.t1, b1);
 }
+// ===== 比率をそろえる（スワップ） =====
+const GAS_RESERVE = 10n ** 15n; // ガス代として 0.001 ETH 残す
+const usesEth = t => t.isWeth && $('payEth').checked;
+function spendable(i) {
+  const t = i === 0 ? S.pool.t0 : S.pool.t1, b = S.bal[i];
+  if (usesEth(t)) return b.eth > GAS_RESERVE ? b.eth - GAS_RESERVE : 0n;
+  return b.erc;
+}
+function useBalances() {
+  if (!S.bal) { log('先にメタマスクに接続してください'); return; }
+  $('use0').value = ethers.formatUnits(spendable(0), S.pool.t0.decimals);
+  $('use1').value = ethers.formatUnits(spendable(1), S.pool.t1.decimals);
+}
+// 手持ち h0,h1 から、レンジの比率にするには何をいくら交換するか（価格は今の値で概算）
+function planSwap(h0, h1) {
+  const P = S.pool, T = getTicks(); if (!T) throw new Error('レンジを正しく入力してください');
+  const [tl, tu] = T, sp = P.sqrtP, sa = sqrtAt(tl), sb = sqrtAt(tu), price = sp * sp; // 生の単位：token1 / token0
+  let a0; // 交換後に持っていたい token0（生）
+  if (sp <= sa) a0 = h0 + h1 / price;           // レンジが今より上：token0 だけ必要
+  else if (sp >= sb) a0 = 0;                    // レンジが今より下：token1 だけ必要
+  else { const R = (sp - sa) * sp * sb / (sb - sp); a0 = (h0 + h1 / price) / (1 + R / price); }
+  if (h0 > a0) return { from: 0, amount: h0 - a0 };
+  return { from: 1, amount: (a0 - h0) * price };
+}
+async function quoteSwap() {
+  try {
+    const P = S.pool;
+    const [u0, u1] = desiredAmounts(P, $('use0').value, $('use1').value);
+    if (u0 === 0n && u1 === 0n) throw new Error('使う量を入れてください（「残高を入れる」も使えます）');
+    const plan = planSwap(Number(u0), Number(u1));
+    const inTok = plan.from === 0 ? P.t0 : P.t1, outTok = plan.from === 0 ? P.t1 : P.t0;
+    const amountIn = floorBig(plan.amount);
+    if (amountIn === 0n || plan.amount < Number(plan.from === 0 ? u0 : u1) * 0.002) {
+      S.swapPlan = null; $('swapGoRow').style.display = 'none';
+      $('swapInfo').innerHTML = 'すでにほぼ必要な比率です。交換は要りません。'; fillAfterSwap(u0, u1); return;
+    }
+    $('swapInfo').textContent = '見積もり中…';
+    const q = await quoterR.quoteExactInputSingle.staticCall({ tokenIn: inTok.addr, tokenOut: outTok.addr, amountIn, fee: P.fee, sqrtPriceLimitX96: 0n });
+    const out = q.amountOut;
+    const spot = plan.from === 0 ? P.sqrtP ** 2 : 1 / P.sqrtP ** 2; // out生 / in生
+    const ideal = Number(amountIn) * spot;
+    const impact = Math.max(0, 1 - Number(out) / ideal) * 100; // 手数料込みの目減り
+    S.swapPlan = { inTok, outTok, amountIn, out, from: plan.from, u0, u1 };
+    $('swapInfo').innerHTML = `<b>${fmt(toNum(amountIn, inTok.decimals))} ${inTok.symbol}</b> → 約 <b>${fmt(toNum(out, outTok.decimals))} ${outTok.symbol}</b> に交換<br>
+      目減り 約${impact.toFixed(2)}%（プール手数料 ${P.fee / 10000}% ＋ 価格への影響）${impact > 3 ? '<br><span class="warn">目減りが大きいです。量を減らすか、流動性の大きいペアを選んでください。</span>' : ''}`;
+    $('swapGoRow').style.display = '';
+  } catch (e) { $('swapInfo').innerHTML = `<span class="bad">${errMsg(e)}</span>`; }
+}
+async function doSwap() {
+  const btn = $('btnSwap'); btn.disabled = true;
+  try {
+    await signerReady();
+    const P = S.pool, X = S.swapPlan; if (!X) throw new Error('先に見積もりをしてください');
+    const slip = Number($('slip').value);
+    const minOut = withSlip(X.out, slip);
+    const ethIn = usesEth(X.inTok), ethOut = usesEth(X.outTok);
+    if (!ethIn) await ensureAllowance(X.inTok, X.amountIn, CHAIN.router);
+    const params = { tokenIn: X.inTok.addr, tokenOut: X.outTok.addr, fee: P.fee, recipient: ethOut ? ROUTER_THIS : S.account,
+      amountIn: X.amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0n };
+    const calls = [routerIface.encodeFunctionData('exactInputSingle', [params])];
+    if (ethOut) calls.push(routerIface.encodeFunctionData('unwrapWETH9', [minOut, S.account]));
+    const router = new ethers.Contract(CHAIN.router, ROUTER_ABI, S.signer);
+    await sendTx(`${X.inTok.symbol} → ${X.outTok.symbol} 交換`, router.multicall(deadline(), calls, { value: ethIn ? X.amountIn : 0n }));
+    // 交換後の量で「入れる額」を埋める（受け取りは最低保証額で見積もる）
+    const n0 = X.from === 0 ? X.u0 - X.amountIn : X.u0 + minOut;
+    const n1 = X.from === 0 ? X.u1 + minOut : X.u1 - X.amountIn;
+    S.swapPlan = null; $('swapGoRow').style.display = 'none';
+    $('swapInfo').textContent = '交換しました。下の「流動性を追加」で追加できます。';
+    await refreshBalances();
+    fillAfterSwap(n0, n1);
+  } catch (e) { log('交換エラー: ' + errMsg(e)); }
+  finally { btn.disabled = false; }
+}
+// 持っている量 n0,n1 の範囲で、比率どおりの「入れる額」を入れる
+function fillAfterSwap(n0, n1) {
+  const P = S.pool;
+  $('amt0').value = $('amt0').disabled ? '' : ethers.formatUnits(n0, P.t0.decimals);
+  S.lastEdited = 0; syncAmounts(0);
+  const need1 = Number($('amt1').value || 0), have1 = toNum(n1, P.t1.decimals);
+  if ($('amt0').disabled || need1 > have1) {
+    $('amt1').value = $('amt1').disabled ? '' : ethers.formatUnits(n1, P.t1.decimals);
+    S.lastEdited = 1; syncAmounts(1);
+  }
+}
+
 function maxAmount(i) {
   if (!S.bal) return;
   const t = i === 0 ? S.pool.t0 : S.pool.t1, b = S.bal[i];
@@ -738,6 +843,10 @@ $('amt1').oninput = () => { S.lastEdited = 1; syncAmounts(1); };
 document.querySelectorAll('.maxBtn').forEach(b => b.onclick = () => maxAmount(Number(b.dataset.i)));
 $('payEth').onchange = () => { refreshBalances(); };
 $('btnMint').onclick = mint;
+$('btnUseBal').onclick = useBalances;
+$('btnQuote').onclick = quoteSwap;
+$('btnSwap').onclick = doSwap;
+$('use0').oninput = $('use1').oninput = () => { S.swapPlan = null; $('swapGoRow').style.display = 'none'; };
 $('btnReload').onclick = () => { loadPositions(); refreshBalances(); };
 $('showClosed').onchange = loadPositions;
 $('posList').onclick = e => {
