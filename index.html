@@ -116,7 +116,7 @@ a{color:var(--accent)}
       <div class="row">
         <button data-pct="5">±5%</button><button data-pct="10">±10%</button><button data-pct="20">±20%</button>
         <button data-pct="30">±30%</button><button data-pct="50">±50%</button><button data-pct="full">フルレンジ</button>
-        <span class="sub" style="margin-left:4px">±</span><input id="pctIn" type="number" min="0.1" max="99" step="any" placeholder="例 15" style="width:80px"><span class="sub">%</span>
+        <span style="white-space:nowrap;display:inline-flex;align-items:center;gap:4px"><span class="sub">±</span><input id="pctIn" type="number" min="0.1" max="99" step="any" placeholder="例 15" style="width:80px"><span class="sub">%</span></span>
       </div>
       <div class="row"><label>下限</label><input id="minP" type="number" step="any"><span class="sub unitTxt"></span></div>
       <div class="row"><label>上限</label><input id="maxP" type="number" step="any"><span class="sub unitTxt"></span></div>
