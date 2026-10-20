@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NBA 流動性管理</title>
+<title>稼ぎ君 流動性管理</title>
 <script src="lib/ethers.umd.min.js"></script>
 <style>
 :root{
@@ -61,7 +61,7 @@ a{color:var(--accent)}
 </head>
 <body>
 <header>
-  <h1>NBA 流動性管理 <span class="sub">Uniswap v3</span></h1>
+  <h1>稼ぎ君 流動性管理 <span class="sub">Uniswap v3</span></h1>
   <select id="chainSel" title="チェーン"></select>
   <span id="netChip" class="chip">未接続</span>
   <span id="acct" class="sub"></span>
@@ -106,6 +106,12 @@ a{color:var(--accent)}
     </div>
 
     <div id="rangeBox" style="display:none">
+      <div id="rebuildBox" class="swapBox" style="display:none;border:1px solid var(--warn);margin-top:16px">
+        <b>レンジの作り直し</b>
+        <div id="rebuildTxt" class="sub" style="margin:6px 0"></div>
+        <div class="row"><button id="btnRebuild" class="primary">作り直す</button><button id="btnRebuildCancel">やめる</button></div>
+        <div id="rebuildStep" class="sub"></div>
+      </div>
       <h2 style="margin-top:20px">② レンジ幅を決める</h2>
       <div class="row">
         <button data-pct="5">±5%</button><button data-pct="10">±10%</button><button data-pct="20">±20%</button>
@@ -568,7 +574,7 @@ async function quoteSwap() {
     const amountIn = floorBig(plan.amount);
     if (amountIn === 0n || plan.amount < Number(plan.from === 0 ? u0 : u1) * 0.002) {
       S.swapPlan = null; $('swapGoRow').style.display = 'none';
-      $('swapInfo').innerHTML = 'すでにほぼ必要な比率です。交換は要りません。'; fillAfterSwap(u0, u1); return;
+      $('swapInfo').innerHTML = 'すでにほぼ必要な比率です。交換は要りません。'; fillAfterSwap(u0, u1); return true;
     }
     $('swapInfo').textContent = '見積もり中…';
     const q = await quoterR.quoteExactInputSingle.staticCall({ tokenIn: inTok.addr, tokenOut: outTok.addr, amountIn, fee: P.fee, sqrtPriceLimitX96: 0n });
@@ -580,7 +586,8 @@ async function quoteSwap() {
     $('swapInfo').innerHTML = `<b>${fmt(toNum(amountIn, inTok.decimals))} ${inTok.symbol}</b> → 約 <b>${fmt(toNum(out, outTok.decimals))} ${outTok.symbol}</b> に交換<br>
       目減り 約${impact.toFixed(2)}%（プール手数料 ${P.fee / 10000}% ＋ 価格への影響）${impact > 3 ? '<br><span class="warn">目減りが大きいです。量を減らすか、流動性の大きいペアを選んでください。</span>' : ''}`;
     $('swapGoRow').style.display = '';
-  } catch (e) { $('swapInfo').innerHTML = `<span class="bad">${errMsg(e)}</span>`; }
+    return true;
+  } catch (e) { $('swapInfo').innerHTML = `<span class="bad">${errMsg(e)}</span>`; return false; }
 }
 async function doSwap() {
   const btn = $('btnSwap'); btn.disabled = true;
@@ -604,7 +611,8 @@ async function doSwap() {
     $('swapInfo').textContent = '交換しました。下の「流動性を追加」で追加できます。';
     await refreshBalances();
     fillAfterSwap(n0, n1);
-  } catch (e) { log('交換エラー: ' + errMsg(e)); }
+    return true;
+  } catch (e) { log('交換エラー: ' + errMsg(e)); return false; }
   finally { btn.disabled = false; }
 }
 // 持っている量 n0,n1 の範囲で、比率どおりの「入れる額」を入れる
@@ -648,6 +656,61 @@ function ethPlan(P, a0, a1, payEth) {
   return { value: 0n, wethSide: -1 };
 }
 
+// ===== レンジを作り直す（閉じる → 比率をそろえる → 新しいレンジで追加） =====
+async function startRebuild(pos) {
+  await loadPool(pos.t0.addr, pos.t1.addr, pos.fee);
+  if (!S.pool) return;
+  // 前と同じ幅のまま、今の価格を真ん中にしたレンジを入れておく
+  const w = Math.sqrt(tickToRaw(pos.tu - pos.tl));
+  const cur = disp(humanPrice(S.pool.sqrtP ** 2));
+  S.full = false;
+  $('minP').value = Number((cur / w).toPrecision(6));
+  $('maxP').value = Number((cur * w).toPrecision(6));
+  updateRange();
+  S.rebuild = pos;
+  $('rebuildTxt').textContent = `#${pos.id} を閉じて、下のレンジ（前と同じ幅・今の価格が真ん中）で作り直します。レンジを確かめて、必要なら変えてから「作り直す」を押してください。メタマスクの承認は3〜5回出ます。`;
+  $('rebuildStep').textContent = '';
+  $('rebuildBox').style.display = '';
+  $('rebuildBox').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+async function refreshPoolPrice() {
+  const s0 = await new ethers.Contract(S.pool.addr, POOL_ABI, rpc).slot0();
+  S.pool.sqrtP = Number(s0.sqrtPriceX96) / 2 ** 96; S.pool.tick = Number(s0.tick);
+  renderPrice(); updateRange();
+}
+async function runRebuild() {
+  const pos = S.rebuild; if (!pos) return;
+  const btn = $('btnRebuild'); btn.disabled = true;
+  const step = t => { $('rebuildStep').textContent = t; log('作り直し：' + t); };
+  try {
+    await signerReady();
+    if (!getTicks()) throw new Error('レンジを正しく入力してください');
+    $('payEth').checked = $('recvEth').checked; // 受け取りと支払いで ETH／WETH をそろえる
+    await refreshBalances(); const before = S.bal;
+    step('1/3 ポジションを閉じています…');
+    await doDecrease(pos, 100);
+    await refreshBalances(); const after = S.bal;
+    const got = i => {
+      const t = i === 0 ? S.pool.t0 : S.pool.t1;
+      const d = (after[i].erc - before[i].erc) + (usesEth(t) ? after[i].eth - before[i].eth : 0n);
+      return d > 0n ? d : 0n;
+    };
+    const g0 = got(0), g1 = got(1);
+    if (g0 === 0n && g1 === 0n) throw new Error('閉じた結果の受け取りが確認できません。右の一覧と残高を確かめてください');
+    $('use0').value = ethers.formatUnits(g0, S.pool.t0.decimals);
+    $('use1').value = ethers.formatUnits(g1, S.pool.t1.decimals);
+    step('2/3 比率をそろえています…');
+    await refreshPoolPrice();
+    if (!(await quoteSwap())) throw new Error('交換の見積もりで止まりました');
+    if (S.swapPlan && !(await doSwap())) throw new Error('交換で止まりました');
+    step('3/3 新しいレンジで追加しています…');
+    if (!(await mint())) throw new Error('追加で止まりました');
+    step('作り直しが完了しました。');
+    S.rebuild = null;
+  } catch (e) { step('止まりました：' + errMsg(e) + '（ここから先は画面の各ボタンで手動で続けられます）'); loadPositions(); }
+  finally { btn.disabled = false; }
+}
+
 async function mint() {
   const btn = $('btnMint'); btn.disabled = true;
   try {
@@ -668,7 +731,8 @@ async function mint() {
     if (ep.value > 0n) calls.push(npmIface.encodeFunctionData('refundETH', []));
     await sendTx('新規ポジション作成', npm.multicall(calls, { value: ep.value }));
     await Promise.all([refreshBalances(), loadPositions()]);
-  } catch (e) { log('作成エラー: ' + errMsg(e)); }
+    return true;
+  } catch (e) { log('作成エラー: ' + errMsg(e)); return false; }
   finally { btn.disabled = false; }
 }
 
@@ -714,6 +778,7 @@ function posHTML(pos, mine) {
       <button data-act="collect">手数料を回収</button>
       <button data-act="add" ${closed ? 'disabled' : ''}>流動性を追加</button>
       <button data-act="remove" ${closed ? 'disabled' : ''}>一部を引き出す</button>
+      <button data-act="rebuild" ${closed ? 'disabled' : ''}>レンジを作り直す</button>
       <button data-act="close" class="danger" ${closed ? 'disabled' : ''}>閉じて全額回収</button>
     </div><div class="panelBox"></div>` : ''}
   </div>`;
@@ -843,6 +908,8 @@ $('amt1').oninput = () => { S.lastEdited = 1; syncAmounts(1); };
 document.querySelectorAll('.maxBtn').forEach(b => b.onclick = () => maxAmount(Number(b.dataset.i)));
 $('payEth').onchange = () => { refreshBalances(); };
 $('btnMint').onclick = mint;
+$('btnRebuild').onclick = runRebuild;
+$('btnRebuildCancel').onclick = () => { S.rebuild = null; $('rebuildBox').style.display = 'none'; };
 $('btnUseBal').onclick = useBalances;
 $('btnQuote').onclick = quoteSwap;
 $('btnSwap').onclick = doSwap;
@@ -853,6 +920,7 @@ $('posList').onclick = e => {
   const b = e.target.closest('button[data-act]'); if (!b) return;
   const card = b.closest('.pos'), pos = S.positions[card.dataset.id];
   if (b.dataset.act === 'collect') run(card, () => doCollect(pos));
+  else if (b.dataset.act === 'rebuild') startRebuild(pos);
   else openPanel(card, pos, b.dataset.act);
 };
 $('btnLook').onclick = async () => {
