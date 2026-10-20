@@ -60,7 +60,8 @@ a{color:var(--accent)}
 </head>
 <body>
 <header>
-  <h1>NBA 流動性管理 <span class="sub">Uniswap v3 / Robinhood Chain</span></h1>
+  <h1>NBA 流動性管理 <span class="sub">Uniswap v3</span></h1>
+  <select id="chainSel" title="チェーン"></select>
   <span id="netChip" class="chip">未接続</span>
   <span id="acct" class="sub"></span>
   <button id="btnConnect" class="primary">メタマスクに接続</button>
@@ -145,19 +146,39 @@ a{color:var(--accent)}
 <script>
 const { ethers } = window;
 
-// ===== 設定（Robinhood Chain / Uniswap v3 公式アドレス） =====
-const CHAIN = {
-  id: 4663, hex: '0x1237', name: 'Robinhood Chain',
-  rpc: 'https://rpc.mainnet.chain.robinhood.com',
-  explorer: 'https://robinhoodchain.blockscout.com',
+// ===== 設定（チェーンごとの Uniswap v3 公式アドレス：developers.uniswap.org の deployments より） =====
+const CHAINS = {
+  robinhood: {
+    id: 4663, hex: '0x1237', name: 'Robinhood Chain',
+    rpc: 'https://rpc.mainnet.chain.robinhood.com', explorer: 'https://robinhoodchain.blockscout.com',
+    npm: '0x73991a25c818bf1f1128deaab1492d45638de0d3', factory: '0x1f7d7550b1b028f7571e69a784071f0205fd2efa',
+    router: '0xcaf681a66d020601342297493863e78c959e5cb2', quoter: '0x33e885ed0ec9bf04ecfb19341582aadcb4c8a9e7',
+    weth: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73',
+    gecko: 'robinhood', geckoDex: 'uniswap-v3-robinhood', uni: 'robinhood',
+    favs: [{ addr: '0xd29893ffac8b29ec4db2cfe0cdb3fe1377c028ff', name: 'Index / WETH 1%' }],
+  },
+  arbitrum: {
+    id: 42161, hex: '0xa4b1', name: 'Arbitrum One',
+    rpc: 'https://arb1.arbitrum.io/rpc', explorer: 'https://arbiscan.io',
+    npm: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984',
+    router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45', quoter: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
+    weth: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1',
+    gecko: 'arbitrum', geckoDex: 'uniswap_v3_arbitrum', uni: 'arbitrum',
+    favs: [{ addr: '0xc6962004f452be9203591991d15f6b388e09e8d0', name: 'WETH / USDC 0.05%' }],
+  },
 };
-const NPM = '0x73991a25c818bf1f1128deaab1492d45638de0d3';
-const FACTORY = '0x1f7d7550b1b028f7571e69a784071f0205fd2efa';
-const WETH = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73';
-const DEFAULT_FAVS = [{ addr: '0xd29893ffac8b29ec4db2cfe0cdb3fe1377c028ff', name: 'Index / WETH 1%' }];
+// 使うチェーン：URLの ?chain= ＞ 前回の選択 ＞ Robinhood
+const CHAIN_KEY = (() => {
+  const q = new URLSearchParams(location.search).get('chain');
+  let saved = null; try { saved = localStorage.getItem('nba.chain'); } catch {}
+  return CHAINS[q] ? q : CHAINS[saved] ? saved : 'robinhood';
+})();
+const CHAIN = CHAINS[CHAIN_KEY];
+const NPM = CHAIN.npm, FACTORY = CHAIN.factory, WETH = CHAIN.weth;
+const DEFAULT_FAVS = CHAIN.favs;
 // ペア一覧の取得元（GeckoTerminal 公開API・無料・1分30回まで）
 const GECKO = 'https://api.geckoterminal.com/api/v2';
-const GECKO_DEX = 'uniswap-v3-robinhood';
+const GECKO_DEX = CHAIN.geckoDex;
 const MAX128 = (1n << 128n) - 1n;
 const MIN_TICK = -887272, MAX_TICK = 887272;
 
@@ -299,7 +320,7 @@ const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-const L = { sort: 'vol', page: 0, pools: [], search: null, favs: store.get('nba.favs', DEFAULT_FAVS), busy: false };
+const L = { sort: 'vol', page: 0, pools: [], search: null, favs: store.get('nba.favs.' + CHAIN_KEY, DEFAULT_FAVS), busy: false };
 let geckoLast = 0;
 async function gecko(path) {
   const wait = geckoLast + 2100 - Date.now(); // 回数制限よけ：2.1秒あける
@@ -327,14 +348,14 @@ const isFav = addr => L.favs.some(f => f.addr === addr.toLowerCase());
 function toggleFav(addr, name) {
   addr = addr.toLowerCase();
   L.favs = isFav(addr) ? L.favs.filter(f => f.addr !== addr) : [...L.favs, { addr, name }];
-  store.set('nba.favs', L.favs);
+  store.set('nba.favs.' + CHAIN_KEY, L.favs);
   renderPairs(); if (S.pool) $('btnFav').textContent = isFav(S.pool.addr) ? '★' : '☆';
 }
 async function loadMorePairs() {
   if (L.busy || L.page >= 10) return;
   L.busy = true; if (!L.search) $('pairMsg').textContent = '読み込み中…';
   try {
-    const j = await gecko(`/networks/robinhood/dexes/${GECKO_DEX}/pools?page=${L.page + 1}&sort=h24_volume_usd_desc`);
+    const j = await gecko(`/networks/${CHAIN.gecko}/dexes/${GECKO_DEX}/pools?page=${L.page + 1}&sort=h24_volume_usd_desc`);
     L.page++;
     const seen = new Set(L.pools.map(p => p.addr));
     L.pools.push(...geckoPools(j).filter(p => !seen.has(p.addr)));
@@ -348,8 +369,8 @@ async function searchPairs(q) {
   $('pairMsg').textContent = '検索中…';
   try {
     const j = ethers.isAddress(q)
-      ? await gecko(`/networks/robinhood/tokens/${q.toLowerCase()}/pools?page=1`)
-      : await gecko(`/search/pools?query=${encodeURIComponent(q)}&network=robinhood`);
+      ? await gecko(`/networks/${CHAIN.gecko}/tokens/${q.toLowerCase()}/pools?page=1`)
+      : await gecko(`/search/pools?query=${encodeURIComponent(q)}&network=${CHAIN.gecko}`);
     if ($('pairQ').value.trim() !== q) return; // 入力が変わっていたら捨てる
     L.search = geckoPools(j);
     $('pairMsg').textContent = `「${q}」の検索結果 ${L.search.length}件`;
@@ -576,7 +597,7 @@ function posHTML(pos, mine) {
   const chip = closed ? '<span class="chip">閉じています</span>' : inRange ? '<span class="chip on">レンジ内</span>' : '<span class="chip off">レンジ外</span>';
   return `<div class="pos" data-id="${pos.id}">
     <div class="head"><b>#${pos.id}</b><span>${pos.t0.symbol} / ${pos.t1.symbol}</span><span class="chip">${pos.fee / 10000}%</span>${chip}
-      <a class="sub" href="https://app.uniswap.org/positions/v3/robinhood/${pos.id}" target="_blank">Uniswapで見る</a></div>
+      <a class="sub" href="https://app.uniswap.org/positions/v3/${CHAIN.uni}/${pos.id}" target="_blank">Uniswapで見る</a></div>
     <div class="kv">
       <div>レンジ</div><div>${fmt(pl)} 〜 ${fmt(pu)} ${pos.t1.symbol}/${pos.t0.symbol}（今 ${fmt(pc)}）</div>
       <div>入っている量</div><div>${fmt(a0)} ${pos.t0.symbol} ＋ ${fmt(a1)} ${pos.t1.symbol}</div>
@@ -683,6 +704,11 @@ async function run(card, fn) {
 }
 
 // ===== イベント =====
+Object.entries(CHAINS).forEach(([k, c]) => $('chainSel').add(new Option(c.name, k, false, k === CHAIN_KEY)));
+$('chainSel').onchange = () => {
+  try { localStorage.setItem('nba.chain', $('chainSel').value); } catch {}
+  location.href = location.pathname + '?chain=' + $('chainSel').value;
+};
 $('btnConnect').onclick = connect;
 $('btnLoadPool').onclick = () => loadPool($('tokA').value.trim(), $('tokB').value.trim(), Number($('feeSel').value));
 document.querySelectorAll('#pickTabs .tab').forEach(b => b.onclick = () => {
