@@ -199,7 +199,7 @@ details.box summary{cursor:pointer;font-weight:600}
           </div>
           <div class="row">
             <input id="pairQ" placeholder="トークン名・アドレスで検索（例：NVDA、Index）" style="flex:1">
-            <select id="minTvl"><option value="0">流動性 制限なし</option><option value="1000">$1千以上</option><option value="10000" selected>$1万以上</option><option value="100000">$10万以上</option></select>
+            <select id="minTvl" title="プールにみんなが預けている合計額で絞り込みます（自分の運用額とは関係ありません）"><option value="0">プールの流動性：制限なし</option><option value="1000">プールの流動性 $1千以上</option><option value="10000" selected>プールの流動性 $1万以上</option><option value="100000">プールの流動性 $10万以上</option></select>
           </div>
           <div id="pairList" class="plist"><div class="empty">読み込み中…</div></div>
           <div class="row" style="margin-top:12px"><button id="btnMore">もっと読み込む</button><span id="pairMsg" class="sub"></span></div>
@@ -362,6 +362,6 @@ details.box summary{cursor:pointer;font-weight:600}
   </div>
 </div>
 
-<script src="app.js?v=20261021233122"></script>
+<script src="app.js?v=20261021233555"></script>
 </body>
 </html>
