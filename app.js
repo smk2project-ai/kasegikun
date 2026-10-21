@@ -411,9 +411,12 @@ function renderPairs() {
 //   作り直し1回のコスト：手持ちの約半分を交換する手数料（プール手数料率×0.5）＋ガス代。
 const ANA_KEY = 'nba.ana2.' + CHAIN_KEY, ANA_TTL = 24 * 3600 * 1000, ANA_N = 20, ANA_MIN_TVL = 50000;
 const GAS_UNITS_REBUILD = 750000; // 閉じる＋交換＋作成のガスの目安
+const GAS_UNITS_MINT = 500000;    // 新規作成のガスの目安（使用許可は別）
+const MIN_CAPITAL = 50;           // 運用額の最低（ドル）
 const WIDTHS = [0.05, 0.1, 0.2, 0.3, 0.5, 'full'];
 const A = { busy: false, data: store.get(ANA_KEY, null), sort: 'eff',
   opt: store.get('nba.anaOpt', { width: 'auto', delay: 0.5, capital: 1000 }) };
+A.opt.capital = Math.max(MIN_CAPITAL, Number(A.opt.capital) || 1000);
 function normCdf(x) { // 標準正規分布の累積（近似）
   const t = 1 / (1 + 0.2316419 * Math.abs(x)), d = 0.3989423 * Math.exp(-x * x / 2);
   const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
@@ -469,9 +472,10 @@ function yieldModel(x, w, delay = A.opt.delay, C = A.opt.capital) {
     days = b * b / (x.sd ** 2);                                      // レンジを外れるまでの平均日数
     inPct = days / (days + delay); rebuilds = 365 / (days + delay);
   }
-  const costEach = 0.5 * x.feePct + (x.gasUsd || 0) / C * 100;        // 作り直し1回のコスト（運用額に対する％）
+  const gasEach = (x.gasUsd || 0) / C * 100;                          // 作り直し1回のガス代（運用額に対する％）
+  const costEach = 0.5 * x.feePct + gasEach;                          // 作り直し1回のコスト（交換の手数料＋ガス代）
   const cost = rebuilds * costEach;
-  return { w, feeIn, ilIn, inPct, rebuilds, days, cost, eff: inPct * (feeIn - ilIn) - cost };
+  return { w, feeIn, ilIn, inPct, rebuilds, days, cost, gasEach, gasYear: rebuilds * gasEach, eff: inPct * (feeIn - ilIn) - cost };
 }
 function bestModel(x) {
   if (A.opt.width !== 'auto') return yieldModel(x, A.opt.width === 'full' ? 'full' : Number(A.opt.width));
@@ -522,7 +526,7 @@ function renderAnalysis() {
   const controls = `<div class="row" style="margin:10px 0 6px;gap:6px">
       <label class="sub">レンジ幅 <select id="anaW">${opt('auto', '一番良い幅を自動で', o.width)}${[0.05, 0.1, 0.2, 0.3, 0.5].map(w => opt(w, wLabel(w), o.width)).join('')}${opt('full', 'フルレンジ', o.width)}</select></label>
       <label class="sub">作り直すまで <select id="anaD">${opt(0.1, 'すぐ（ほぼ自動）', o.delay)}${opt(0.5, '半日以内', o.delay)}${opt(1, '1日以内', o.delay)}${opt(2, '2日以内', o.delay)}</select></label>
-      <label class="sub">運用額 $<input id="anaC" type="number" min="10" step="1" value="${o.capital}" style="width:110px;padding:7px 8px" title="$10以上で自由に入力（入力後にEnterか、ほかの場所を押すと計算し直します）"></label></div>`;
+      <label class="sub">運用額 $<input id="anaC" type="number" min="${MIN_CAPITAL}" step="1" value="${o.capital}" style="width:110px;padding:7px 8px" title="$${MIN_CAPITAL}以上で自由に入力（入力後にEnterか、ほかの場所を押すと計算し直します）"></label></div>`;
   const tabs = `<div class="row between" style="margin:0 0 10px"><div class="tabs" style="margin:0">
       <button data-asort="eff" class="${A.sort === 'eff' ? 'on' : ''}">実質利回り順</button>
       <button data-asort="safe" class="${A.sort === 'safe' ? 'on' : ''}">安定重視</button>
@@ -542,17 +546,17 @@ function renderAnalysis() {
         <div><small>手数料（レンジ内）</small><b class="good">${pct(m.feeIn)}</b></div>
         <div><small>予想ロス（レンジ内）</small><b class="bad">${pct(m.ilIn)}</b></div>
         <div><small>レンジ内にいる時間</small><b>${pct(m.inPct * 100, 0)}</b></div>
-        <div><small>作り直しのコスト</small><b class="bad">${pct(m.cost)}</b></div>
+        <div><small>作り直しのコスト（年）</small><b class="bad">${pct(m.cost)}</b><small>うちガス代 ${pct(m.gasYear, m.gasYear < 1 ? 2 : 1)}</small></div>
         <div><small>変動率（年）</small><b>${pct(p.sigmaY, 0)}</b></div>
         <div><small>取引高の安定度</small><b class="${stCls}">${stTxt}</b></div>
         <div><small>差し引き（全価格帯）</small><b class="${p.net >= 0 ? 'good' : 'bad'}">${sgn(p.net)}</b></div>
-        <div><small>1週間で±20%を外れる確率</small><b>${pct(p.out7, 0)}</b></div>
+        <div><small>ガス代（作り直し1回）</small><b>約$${(p.gasUsd || 0).toFixed(3)}</b><small>運用額の ${pct(m.gasEach, m.gasEach < 0.1 ? 3 : 2)}</small></div>
       </div></div>`;
   }).join('') : `<div class="empty">${A.sort === 'safe' ? '条件に合うペアがありません（値動きが大きいか、取引高が不安定か、実質利回りがマイナス）。' : '該当するペアがありません'}</div>`);
   $('btnAna').onclick = runAnalysis;
   document.querySelectorAll('[data-asort]').forEach(b => b.onclick = e => { e.stopPropagation(); A.sort = b.dataset.asort; renderAnalysis(); });
   const saveOpt = () => {
-    const c = Math.max(10, Math.round(Number($('anaC').value) || 0)); // 運用額は $10 以上
+    const c = Math.max(MIN_CAPITAL, Math.round(Number($('anaC').value) || 0)); // 運用額は $50 以上
     A.opt = { width: $('anaW').value, delay: Number($('anaD').value), capital: c }; store.set('nba.anaOpt', A.opt); renderAnalysis();
   };
   ['anaW', 'anaD', 'anaC'].forEach(id => { $(id).onchange = saveOpt; $(id).onclick = e => e.stopPropagation(); });
@@ -811,7 +815,13 @@ function renderUsd() {
   const v = i => { const t = i ? S.pool.t1 : S.pool.t0, p = priceOf(t), a = Number($('amt' + i).value) || 0; return p != null ? a * p : null; };
   const u0 = v(0), u1 = v(1);
   $('usd0').textContent = u0 != null ? usd(u0) : '$-'; $('usd1').textContent = u1 != null ? usd(u1) : '$-';
-  $('usdTotal').textContent = u0 != null && u1 != null ? usd(u0 + u1) : '-';
+  const total = u0 != null && u1 != null ? u0 + u1 : null;
+  $('usdTotal').textContent = total != null ? usd(total) : '-';
+  // ガス代の目安（入れる額に対する割合）
+  const gm = gasUsdOf(GAS_UNITS_MINT), gr = gasUsdOf(GAS_UNITS_REBUILD);
+  const share = g => total > 0 && g != null ? `（${(g / total * 100).toFixed(g / total * 100 < 0.1 ? 3 : 2)}%）` : '';
+  $('gasInfo').innerHTML = gm == null ? '' : `ガス代の目安：作成 約$${gm.toFixed(3)}${share(gm)}・作り直し1回 約$${gr.toFixed(3)}${share(gr)}`
+    + (total > 0 && total < MIN_CAPITAL ? `<br><span class="warn">入れる額が$${MIN_CAPITAL}未満です。ガス代の割合が大きくなるので、$${MIN_CAPITAL}以上がおすすめです。</span>` : '');
 }
 async function refreshBalances() {
   if (!S.account || !S.pool) return;
@@ -1208,8 +1218,14 @@ async function run(card, fn) {
 
 // ===== ガス代の表示 =====
 async function updateGas() {
-  try { const f = await rpc.getFeeData(); $('gasChip').textContent = `Gas: ${Number(ethers.formatUnits(f.gasPrice ?? 0n, 'gwei')).toPrecision(3)} Gwei`; } catch {}
+  try {
+    const f = await rpc.getFeeData(); S.gasPrice = f.gasPrice ?? 0n;
+    $('gasChip').textContent = `Gas: ${Number(ethers.formatUnits(S.gasPrice, 'gwei')).toPrecision(3)} Gwei`;
+    renderUsd();
+  } catch {}
 }
+// ガス量 → ドル（今の相場とETHの価格で）
+const gasUsdOf = units => S.gasPrice != null && priceOf(WETH) ? Number(ethers.formatEther(S.gasPrice * BigInt(units))) * priceOf(WETH) : null;
 
 // ===== 収益概要 =====
 // ポジションごとに、作成・追加・引き出し・回収の記録（イベント）をチェーンから読む。
