@@ -456,7 +456,7 @@ const pct = (x, d = 1) => isFinite(x) ? x.toFixed(d) + '%' : '-';
 function renderAnalysis() {
   $('btnMore').style.display = 'none';
   const head = `<div class="anaHead"><b style="color:var(--text)">分析順の見方</b><br>
-    「差し引き」＝手数料APR（30日平均）−予想インパーマネントロス（年率）。値動きの小さい（変動率が低い）ペアほどロスが小さく、差し引きがプラスで大きいほど、過去30日のデータでは手数料がロスを上回っていたことを示します。
+    「差し引き」＝手数料の年利（過去30日の実績を1年分に換算）−予想インパーマネントロス（年率）。数字はすべて<b>年率</b>です（月あたりは約12分の1）。値動きの小さい（変動率が低い）ペアほどロスが小さく、差し引きがプラスで大きいほど、過去30日のデータでは手数料がロスを上回っていたことを示します。
     どちらも全価格帯に入れた場合の目安で、レンジを狭くすると両方が同じ倍率で大きくなります。<b>過去のデータからの見積もりで、将来の利益を保証するものではありません。</b>対象は流動性 $5万以上・「⚠ 要確認」のないペアのうち、平均APRの高い上位${ANA_N}件です。</div>`;
   if (A.busy) { $('pairList').innerHTML = head + `<div class="empty" id="anaMsg">${A.progress || '分析しています…'}</div>`; return; }
   const d = A.data;
@@ -479,10 +479,10 @@ function renderAnalysis() {
           <div class="sub" style="margin-top:4px">流動性 ${usd(p.tvl)}・30日平均の取引高 ${usd(p.volUsd)}/日</div></div>
         <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
       <div class="metrics">
-        <div><small>手数料APR（30日）</small><b class="good">${pct(p.feeApr)}</b></div>
+        <div><small>手数料の年利（過去30日から）</small><b class="good">${pct(p.feeApr)}</b><small>月あたり約${pct(p.feeApr / 12, 0)}</small></div>
         <div><small>変動率（年）</small><b>${pct(p.sigmaY, 0)}</b></div>
-        <div><small>予想ロス（年）</small><b class="bad">${pct(p.ilApr)}</b></div>
-        <div><small>差し引き</small><b class="${p.net >= 0 ? 'good' : 'bad'}">${p.net >= 0 ? '+' : ''}${pct(p.net)}</b></div>
+        <div><small>予想ロス（年率）</small><b class="bad">${pct(p.ilApr)}</b></div>
+        <div><small>差し引き（年率）</small><b class="${p.net >= 0 ? 'good' : 'bad'}">${p.net >= 0 ? '+' : ''}${pct(p.net)}</b></div>
         <div><small>1週間で±20%を外れる確率</small><b>${pct(p.out7, 0)}</b></div>
       </div></div>`;
   }).join('');
@@ -653,7 +653,7 @@ async function loadPoolDetail() {
       + (() => { const x = A.data?.items?.find(i => i.addr === P.addr.toLowerCase() && isFinite(i.net)); return x ? `
       <div>変動率（年・30日）</div><div>${pct(x.sigmaY, 0)}</div>
       <div>予想ロス（年）</div><div class="bad">${pct(x.ilApr)}</div>
-      <div>差し引き（分析）</div><div class="${x.net >= 0 ? 'good' : 'bad'}">${x.net >= 0 ? '+' : ''}${pct(x.net)}</div>` : ''; })();
+      <div>差し引き（分析・年率）</div><div class="${x.net >= 0 ? 'good' : 'bad'}">${x.net >= 0 ? '+' : ''}${pct(x.net)}</div>` : ''; })();
     renderUsd();
   } catch (e) { $('poolDetail').innerHTML = `<div>読み込みエラー</div><div>${errMsg(e)}</div>`; }
 }
