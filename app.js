@@ -522,7 +522,7 @@ function renderAnalysis() {
   const controls = `<div class="row" style="margin:10px 0 6px;gap:6px">
       <label class="sub">レンジ幅 <select id="anaW">${opt('auto', '一番良い幅を自動で', o.width)}${[0.05, 0.1, 0.2, 0.3, 0.5].map(w => opt(w, wLabel(w), o.width)).join('')}${opt('full', 'フルレンジ', o.width)}</select></label>
       <label class="sub">作り直すまで <select id="anaD">${opt(0.1, 'すぐ（ほぼ自動）', o.delay)}${opt(0.5, '半日以内', o.delay)}${opt(1, '1日以内', o.delay)}${opt(2, '2日以内', o.delay)}</select></label>
-      <label class="sub">運用額 <select id="anaC">${opt(1000, '$1,000', o.capital)}${opt(5000, '$5,000', o.capital)}${opt(10000, '$10,000', o.capital)}</select></label></div>`;
+      <label class="sub">運用額 $<input id="anaC" type="number" min="10" step="1" value="${o.capital}" style="width:110px;padding:7px 8px" title="$10以上で自由に入力（入力後にEnterか、ほかの場所を押すと計算し直します）"></label></div>`;
   const tabs = `<div class="row between" style="margin:0 0 10px"><div class="tabs" style="margin:0">
       <button data-asort="eff" class="${A.sort === 'eff' ? 'on' : ''}">実質利回り順</button>
       <button data-asort="safe" class="${A.sort === 'safe' ? 'on' : ''}">安定重視</button>
@@ -551,7 +551,10 @@ function renderAnalysis() {
   }).join('') : `<div class="empty">${A.sort === 'safe' ? '条件に合うペアがありません（値動きが大きいか、取引高が不安定か、実質利回りがマイナス）。' : '該当するペアがありません'}</div>`);
   $('btnAna').onclick = runAnalysis;
   document.querySelectorAll('[data-asort]').forEach(b => b.onclick = e => { e.stopPropagation(); A.sort = b.dataset.asort; renderAnalysis(); });
-  const saveOpt = () => { A.opt = { width: $('anaW').value, delay: Number($('anaD').value), capital: Number($('anaC').value) }; store.set('nba.anaOpt', A.opt); renderAnalysis(); };
+  const saveOpt = () => {
+    const c = Math.max(10, Math.round(Number($('anaC').value) || 0)); // 運用額は $10 以上
+    A.opt = { width: $('anaW').value, delay: Number($('anaD').value), capital: c }; store.set('nba.anaOpt', A.opt); renderAnalysis();
+  };
   ['anaW', 'anaD', 'anaC'].forEach(id => { $(id).onchange = saveOpt; $(id).onclick = e => e.stopPropagation(); });
 }
 
