@@ -703,7 +703,7 @@ function feeCards(selFee, avail) {
   return FEE_LEVELS.map(f => {
     const a = avail ? avail[f.fee] : undefined;
     const info = a === undefined ? '' : a === null ? '<em class="sub">プールなし</em>'
-      : `<em class="good">${a.tvl != null ? '預け入れ ' + usd(a.tvl) : 'プールあり'}${a.apr ? `<br>年利の目安 ${a.apr >= 1000 ? Math.round(a.apr).toLocaleString() : a.apr.toFixed(1)}%` : ''}</em>`;
+      : `<em class="good">${a.tvl != null ? '預け入れ ' + usd(a.tvl) : 'プールあり'}${a.apr ? `<br>手数料だけの年利 ${a.apr >= 1000 ? Math.round(a.apr).toLocaleString() : a.apr.toFixed(1)}%` : ''}</em>`;
     return `<button class="fee ${f.fee === selFee ? 'on' : ''} ${a === null ? 'none' : ''}" data-fee="${f.fee}" title="${f.ex}">
       <b>${f.label}</b><span>${f.desc}</span>${info}</button>`;
   }).join('');
@@ -876,7 +876,7 @@ async function loadPoolDetail() {
     $('poolDetail').innerHTML = `
       <div>預け入れ総額</div><div>${usd(tvl)}</div>
       <div>24時間の取引額</div><div>${usd(vol)}</div>
-      <div>年利の目安（全体平均）</div><div class="apr">${isFinite(apr) ? apr.toFixed(2) + '%' : '-'}</div>
+      <div>手数料だけの年利（全体平均）</div><div class="apr">${isFinite(apr) ? apr.toFixed(2) + '%' : '-'}</div>
       <div>${P.t0.symbol}</div><div>${fmt(a0)}　<span class="sub">${p0 != null ? usd(a0 * p0) : ''}</span></div>
       <div>${P.t1.symbol}</div><div>${fmt(a1)}　<span class="sub">${p1 != null ? usd(a1 * p1) : ''}</span></div>`
       + (() => { const x = A.data?.items?.find(i => i.addr === P.addr.toLowerCase() && isFinite(i.net)); return x ? `
