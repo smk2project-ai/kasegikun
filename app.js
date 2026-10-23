@@ -210,6 +210,17 @@ async function connect() {
     alert(msg);
   } finally { btn.disabled = false; }
 }
+// 開いたとき：このサイトを許可済みでチェーンも合っていれば、確認画面なしでそのままつなぐ。チェーンを変えた直後は、切り替えの確認まで出す
+async function autoReconnect() {
+  let want = false;
+  try { want = sessionStorage.getItem('nba.reconnect') === '1'; sessionStorage.removeItem('nba.reconnect'); } catch {}
+  try {
+    const accts = await window.ethereum.request({ method: 'eth_accounts' }); // これは確認画面が出ない
+    if (!accts?.length) return;
+    const cur = parseInt(await window.ethereum.request({ method: 'eth_chainId' }), 16);
+    if (cur === CHAIN.id || want) await connect();
+  } catch {}
+}
 async function ensureChain() {
   const cur = await window.ethereum.request({ method: 'eth_chainId' });
   if (parseInt(cur, 16) === CHAIN.id) return;
@@ -1636,7 +1647,7 @@ function renderEarnings(sums) {
 // ===== イベント =====
 Object.entries(CHAINS).forEach(([k, c]) => $('chainSel').add(new Option(c.name, k, false, k === CHAIN_KEY)));
 $('chainSel').onchange = () => {
-  try { localStorage.setItem('nba.chain', $('chainSel').value); } catch {}
+  try { localStorage.setItem('nba.chain', $('chainSel').value); if (S.account) sessionStorage.setItem('nba.reconnect', '1'); } catch {} // つないでいたら、読み込み直したあと自動でつなぎ直す
   location.href = location.pathname + '?chain=' + $('chainSel').value;
 };
 $('btnConnect').onclick = connect;
@@ -1722,7 +1733,14 @@ $('btnLook').onclick = async () => {
 };
 if (window.ethereum) {
   window.ethereum.on?.('accountsChanged', () => { S.signer = null; connect(); });
-  window.ethereum.on?.('chainChanged', () => location.reload());
+  // メタマスク側でチェーンを変えたら、稼ぎ君もそのチェーンに合わせて読み込み直し、つなぎ直す（対応していないチェーンならそのまま）
+  window.ethereum.on?.('chainChanged', hex => {
+    const k = Object.keys(CHAINS).find(k => CHAINS[k].id === parseInt(hex, 16));
+    if (!k) { location.reload(); return; }
+    try { localStorage.setItem('nba.chain', k); if (S.account) sessionStorage.setItem('nba.reconnect', '1'); } catch {}
+    location.href = location.pathname + '?chain=' + k;
+  });
+  autoReconnect();
 }
 updateGas(); setInterval(updateGas, 30000);
 selectPoolAddr((L.favs[0] || DEFAULT_FAVS[0]).addr);
