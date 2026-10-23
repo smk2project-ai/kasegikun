@@ -248,11 +248,24 @@ async function ensureAllowance(tok, amount, spender = NPM) {
 // ===== GeckoTerminal（一覧・ドル価格） =====
 let geckoLast = 0, geckoGap = GECKO_GAP_MIN;
 // 問い合わせは1本ずつ順番に（同時に投げると回数制限に当たりやすい）
-let geckoQueue = Promise.resolve();
-function gecko(path) {
-  const job = geckoQueue.then(() => geckoFetch(path));
-  geckoQueue = job.catch(() => {});
-  return job;
+// 今見ているペアの分（urgent）は、一覧やおすすめ分析の分より先に回す。skip() が真になった分（別のペアに移った）は問い合わせずに捨てる
+const geckoJobs = []; let geckoBusy = false;
+function gecko(path, o = {}) {
+  return new Promise((resolve, reject) => {
+    const job = { path, resolve, reject, urgent: !!o.urgent, skip: o.skip };
+    const i = job.urgent ? geckoJobs.findIndex(j => !j.urgent) : -1;
+    geckoJobs.splice(i < 0 ? geckoJobs.length : i, 0, job);
+    geckoPump();
+  });
+}
+async function geckoPump() {
+  if (geckoBusy) return; geckoBusy = true;
+  while (geckoJobs.length) {
+    const j = geckoJobs.shift();
+    if (j.skip?.()) { j.reject(new Error('別のペアに移ったため取りやめ')); continue; }
+    try { j.resolve(await geckoFetch(j.path)); } catch (e) { j.reject(e); }
+  }
+  geckoBusy = false;
 }
 async function geckoFetch(path) {
   // 回数制限に当たると 429（CORSなしで Failed to fetch になることも）→ 間隔を広げて、待ってやり直す
@@ -448,14 +461,14 @@ function normCdf(x) { // 標準正規分布の累積（近似）
   const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
   return x > 0 ? 1 - p : p;
 }
-async function analyzePool(p, gasUsd) {
-  // 日足は1日保存して、分析し直すときに問い合わせを減らす
+async function analyzePool(p, gasUsd, go = {}) {
+  // 日足は1日保存して、分析し直すときに問い合わせを減らす（空で返ってきたときは保存しない＝次に取り直す）
   const ck = `nba.ohlcv.${CHAIN_KEY}.${p.addr}`, hit = store.get(ck, null);
-  let list = hit && Date.now() - hit.ts < ANA_TTL ? hit.list : null;
+  let list = hit && hit.list?.length && Date.now() - hit.ts < ANA_TTL ? hit.list : null;
   if (!list) {
-    const j = await gecko(`/networks/${CHAIN.gecko}/pools/${p.addr}/ohlcv/day?aggregate=1&limit=31&currency=token`);
+    const j = await gecko(`/networks/${CHAIN.gecko}/pools/${p.addr}/ohlcv/day?aggregate=1&limit=31&currency=token`, go);
     list = j?.data?.attributes?.ohlcv_list || [];
-    store.set(ck, { ts: Date.now(), list });
+    if (list.length) store.set(ck, { ts: Date.now(), list });
   }
   const rows = list.slice(1).reverse(); // 古い順。今日（途中）の分は除く
   const closes = rows.map(r => Number(r[4])).filter(c => c > 0);
@@ -630,13 +643,19 @@ function renderAnalysis() {
   };
   ['anaW', 'anaD', 'anaC'].forEach(id => { $(id).onchange = saveOpt; $(id).onclick = e => e.stopPropagation(); });
 }
+// 見込み年利のデータが取れなかったとき（回数制限など）。押すと取り直す
+function yieldFail(e) {
+  $('rangeYield').innerHTML = `<span class="sub">見込み年利を計算できませんでした（${errMsg(e)}）。</span>
+    <button id="btnYieldRetry" style="margin-top:6px">もう一度計算する</button>`;
+  $('btnYieldRetry').onclick = () => { $('rangeYield').innerHTML = '<span class="sub">この幅での見込み年利を計算中…（過去30日のデータを取得しています）</span>'; loadPoolDetail(); };
+}
 // 預ける画面：今の幅での見込み年利と、幅ごとの比較（Smart Vault の「全てのレンジを見る」にあたる）
 function renderRangeYield() {
   const P = S.pool, el = $('rangeYield'); if (!P || !el) return;
   const x = P.stats;
   if (!x) { el.innerHTML = '<span class="sub">この幅での見込み年利を計算中…（過去30日のデータを取得しています）</span>'; return; }
   if (x.short) { el.innerHTML = '<span class="sub">過去のデータが足りないため、見込み年利を出せません。</span>'; return; }
-  const T = getTicks(); if (!T) { el.innerHTML = ''; return; }
+  const T = getTicks(); if (!T) { el.innerHTML = '<span class="sub">価格の幅（上限・下限）を入れると、見込み年利が出ます。</span>'; return; }
   const g = gasUsdOf(GAS_UNITS_REBUILD); if (g != null) x.gasUsd = g;
   const C = Math.max(MIN_CAPITAL, Number($('totalUsd').value) || A.opt.capital);
   const cur = modelRange(x, sqrtAt(T[0]), sqrtAt(T[1]), A.opt.delay, C);
@@ -802,8 +821,27 @@ async function loadPoolDetail() {
   $('poolSub').innerHTML = `プール <a href="${CHAIN.explorer}/address/${P.addr}" target="_blank" class="mono">${P.addr.slice(0, 10)}…</a>　手数料 ${P.fee / 10000}%　ティック間隔 ${P.spacing}`;
   try {
     const [r0, r1] = await Promise.all([P.t0, P.t1].map(t => new ethers.Contract(t.addr, ERC20_ABI, rpc).balanceOf(P.addr)));
-    let g = null, gj = null;
-    try { gj = (await gecko(`/networks/${CHAIN.gecko}/pools/${P.addr.toLowerCase()}?include=base_token,quote_token`)).data; g = gj.attributes; } catch {}
+    let g = null, gj = null, gerr = null;
+    const go = { urgent: true, skip: () => S.pool !== P };
+    // 一覧に載っているプールは一覧の値を使い、問い合わせを省く（回数制限に当たりにくくする）。一覧にないものは10分覚えておく
+    // 見込み年利に要るのは「どちらが基準のトークンか」だけ。一覧に載っていれば一覧の値、一度わかったプールはブラウザに覚えておき、問い合わせを省く（回数制限に当たりにくくする）
+    const key = P.addr.toLowerCase(), known = [...L.pools, ...(L.search || [])].find(x => x.addr === key);
+    const bq = store.get('nba.bq.' + CHAIN_KEY, {}), saved = bq[key];
+    const fake = (b, q, tvl, vol) => ({ attributes: tvl != null ? { reserve_in_usd: tvl, volume_usd: { h24: vol } } : null,
+      relationships: { base_token: { data: { id: '_' + b } }, quote_token: { data: { id: '_' + q } } } });
+    const memo = (S.gjCache = S.gjCache || {})[key], fresh = memo && Date.now() - memo.ts < 600000;
+    const fetchGj = async () => {
+      const j = (await gecko(`/networks/${CHAIN.gecko}/pools/${key}?include=base_token,quote_token`, go)).data;
+      const id = r => j?.relationships?.[r]?.data?.id?.split('_').pop()?.toLowerCase();
+      if (id('base_token') && id('quote_token')) { bq[key] = [id('base_token'), id('quote_token')]; store.set('nba.bq.' + CHAIN_KEY, bq); }
+      S.gjCache[key] = { ts: Date.now(), gj: j }; return j;
+    };
+    let later = false; // 覚えていた向きで先に年利を出し、取引額などはあとから取り直す
+    if (known?.base && known?.quote) gj = fake(known.base, known.quote, known.tvl, known.vol);
+    else if (fresh) gj = memo.gj;
+    else if (saved && priceOf(P.t0) != null && priceOf(P.t1) != null) { gj = fake(saved[0], saved[1]); later = true; } // ドル価格が未取得なら問い合わせ（価格も一緒に取れる）
+    else try { gj = await fetchGj(); } catch (e) { gerr = e; }
+    g = gj?.attributes || null;
     if (S.pool !== P) return;
     const a0 = toNum(r0, P.t0.decimals), a1 = toNum(r1, P.t1.decimals);
     const p0 = priceOf(P.t0), p1 = priceOf(P.t1);
@@ -825,10 +863,12 @@ async function loadPoolDetail() {
     const rel = id => gj?.relationships?.[id]?.data?.id?.split('_').pop()?.toLowerCase();
     if (gj && rel('base_token') && rel('quote_token')) {
       try {
-        const st = await analyzePool({ addr: P.addr.toLowerCase(), base: rel('base_token'), quote: rel('quote_token'), fee: P.fee / 10000, tvl }, gasUsdOf(GAS_UNITS_REBUILD) || 0);
+        const st = await analyzePool({ addr: P.addr.toLowerCase(), base: rel('base_token'), quote: rel('quote_token'), fee: P.fee / 10000, tvl }, gasUsdOf(GAS_UNITS_REBUILD) || 0, go);
         if (S.pool === P) { P.stats = st; renderRangeYield(); }
-      } catch { if (S.pool === P) $('rangeYield').innerHTML = '<span class="sub">見込み年利を計算できませんでした。</span>'; }
-    } else $('rangeYield').innerHTML = '<span class="sub">このプールは値動きのデータがないため、見込み年利を出せません。</span>';
+        if (later) fetchGj().then(() => { if (S.pool === P) loadPoolDetail(); }).catch(() => {});
+      } catch (e) { if (S.pool === P) yieldFail(e); }
+    } else if (gerr) yieldFail(gerr);
+    else $('rangeYield').innerHTML = '<span class="sub">このプールは値動きのデータがないため、見込み年利を出せません。</span>';
   } catch (e) { $('poolDetail').innerHTML = `<div>読み込みエラー</div><div>${errMsg(e)}</div>`; }
 }
 // 人が見る価格（1 t0 = ? t1）
@@ -955,11 +995,24 @@ function renderNeed() {
     else if (short) html += '<div class="bad" style="margin-top:8px">2つのトークンを合わせても足りません。額を減らすか、トークンを用意してください。</div>';
   }
   $('needBox').innerHTML = html;
-  if ($('btnAuto')) $('btnAuto').onclick = autoProvide;
+  if ($('btnAuto')) { $('btnAuto').onclick = () => provideOnce(autoProvide); $('btnAuto').disabled = !!S.providing; }
+}
+// 「預ける」「自動で交換して預ける」は、どちらか1つが終わるまでもう押せない。終わったらその場で知らせ、入れた額を空にする（続けて押して2つ作らないように）
+async function provideOnce(fn) {
+  if (S.providing) return;
+  S.providing = true; S.lastMinted = null;
+  const btns = () => [$('btnMint'), $('btnAuto')].filter(Boolean);
+  btns().forEach(b => b.disabled = true);
+  try {
+    if (await fn()) {
+      ['totalUsd', 'amt0', 'amt1'].forEach(id => { if ($(id)) $(id).value = ''; });
+      renderUsd();
+      alert(`ポジション${S.lastMinted ? ' #' + S.lastMinted : ''} を作りました。\n「運用中のペア」で確認できます。\n（同じものをもう1つ作るときだけ、もう一度額を入れて押してください）`);
+    }
+  } finally { S.providing = false; btns().forEach(b => b.disabled = false); }
 }
 const showName = t => t.isWeth && $('payEth').checked ? 'ETH（WETHとして預けます）' : t.symbol;
 async function autoProvide() {
-  const btn = $('btnAuto'); if (btn) btn.disabled = true;
   try {
     await signerReady(); await refreshBalances();
     const P = S.pool, [a0, a1] = desiredAmounts(P, $('amt0').value, $('amt1').value);
@@ -968,7 +1021,7 @@ async function autoProvide() {
     let from, amountIn;
     if (h1 < a1) { from = 0; amountIn = floorBig(Number(a1 - h1) / price * 1.03); if (h0 - amountIn < a0 * 97n / 100n) throw new Error('交換すると、もう片方が足りなくなります'); }
     else if (h0 < a0) { from = 1; amountIn = floorBig(Number(a0 - h0) * price * 1.03); if (h1 - amountIn < a1 * 97n / 100n) throw new Error('交換すると、もう片方が足りなくなります'); }
-    else { await mint(); return; }
+    else return await mint();
     const inTok = from === 0 ? P.t0 : P.t1, outTok = from === 0 ? P.t1 : P.t0;
     log(`自動で交換：${fmt(toNum(amountIn, inTok.decimals))} ${inTok.symbol} → ${outTok.symbol}`);
     const q = await bestQuote(inTok, outTok, amountIn);
@@ -977,9 +1030,8 @@ async function autoProvide() {
     await refreshBalances();
     const n0 = spendable(0), n1 = spendable(1);
     fillAfterSwap(n0 < a0 ? n0 : a0, n1 < a1 ? n1 : a1); // 目標額の範囲で、比率どおりに入れ直す
-    await mint();
-  } catch (e) { log('自動で預ける：' + errMsg(e)); }
-  finally { if (btn) btn.disabled = false; }
+    return await mint();
+  } catch (e) { log('自動で預ける：' + errMsg(e)); alert('自動で預ける：' + errMsg(e)); return false; }
 }
 function renderUsd() {
   if (!S.pool) return;
@@ -1221,13 +1273,13 @@ async function mint() {
     // 新しいポジション番号を取り出してメモを付ける
     for (const lg of r.logs) {
       if (lg.address.toLowerCase() !== NPM.toLowerCase()) continue;
-      try { const ev = npmIface.parseLog(lg); if (ev?.name === 'IncreaseLiquidity') { setMemo(ev.args.tokenId, $('memo').value.trim()); log(`ポジション #${ev.args.tokenId} を作りました`); break; } } catch {}
+      try { const ev = npmIface.parseLog(lg); if (ev?.name === 'IncreaseLiquidity') { setMemo(ev.args.tokenId, $('memo').value.trim()); S.lastMinted = String(ev.args.tokenId); log(`ポジション #${ev.args.tokenId} を作りました`); break; } } catch {}
     }
     $('memo').value = '';
     await Promise.all([refreshBalances(), loadPositions()]);
     loadPortfolio();
     return true;
-  } catch (e) { log('作成エラー: ' + errMsg(e)); return false; }
+  } catch (e) { log('作成エラー: ' + errMsg(e)); if (S.providing) alert('作成できませんでした：' + errMsg(e)); return false; }
   finally { btn.disabled = false; }
 }
 
@@ -1632,7 +1684,7 @@ $('amt0').oninput = () => { S.lastEdited = 0; syncAmounts(0); };
 $('amt1').oninput = () => { S.lastEdited = 1; syncAmounts(1); };
 document.querySelectorAll('.fracs').forEach(g => g.onclick = e => { const b = e.target.closest('[data-frac]'); if (b) fracAmount(Number(g.dataset.i), Number(b.dataset.frac)); });
 $('payEth').onchange = () => { refreshBalances(); };
-$('btnMint').onclick = mint;
+$('btnMint').onclick = () => provideOnce(mint);
 $('btnRebuild').onclick = runRebuild;
 $('btnRebuildCancel').onclick = () => { S.rebuild = null; $('rebuildBox').style.display = 'none'; };
 $('btnUseBal').onclick = useBalances;
