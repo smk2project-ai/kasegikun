@@ -364,17 +364,23 @@ async function loadPortfolio() {
     store.set('nba.pfTokens.' + CHAIN_KEY, [...set].slice(0, 30));
     const toks = await Promise.all([...set].map(token));
     const [eth, ...bals] = await Promise.all([rpc.getBalance(S.account), ...toks.map(t => new ethers.Contract(t.addr, ERC20_ABI, rpc).balanceOf(S.account))]);
+    // 量は先に出し、ドル価格（GeckoTerminal）は取れてから入れる。価格が取れないあいだ合計を $0 と見せない
+    const draw = pending => {
+      const rows = [{ sym: 'ETH', name: 'Ethereum', addr: 'eth', amt: toNum(eth, 18), p: priceOf(WETH) }]
+        .concat(toks.map((t, i) => ({ sym: t.symbol, name: S.tokInfo[t.addr.toLowerCase()]?.name || t.symbol, addr: t.addr, amt: toNum(bals[i], t.decimals), p: priceOf(t) })))
+        .filter(r => r.amt > 0);
+      rows.forEach(r => r.v = r.p != null ? r.amt * r.p : null);
+      rows.sort((a, b) => (b.v ?? -1) - (a.v ?? -1));
+      const miss = rows.some(r => r.v == null), sum = rows.reduce((s, r) => s + (r.v || 0), 0);
+      $('pfTotal').textContent = rows.length && miss && !rows.some(r => r.v != null) ? (pending ? '価格を取得中…' : '価格不明') : usd(sum) + (miss ? '＋α' : '');
+      $('pfList').innerHTML = rows.length ? rows.map(r => `<div class="pfRow">${av(r.sym, r.addr)}
+        <div class="main"><div>${r.name}</div><div class="sub">${fmt(r.amt)} ${r.sym}</div></div>
+        <div class="r">${r.v != null ? usd(r.v) : `<span class="sub">${pending ? '取得中…' : '価格不明'}</span>`}</div></div>`).join('')
+        : '<div class="sub">トークンがありません。</div>';
+    };
+    draw(true);
     await ensurePrices([...set]);
-    const rows = [{ sym: 'ETH', name: 'Ethereum', addr: 'eth', amt: toNum(eth, 18), p: priceOf(WETH) }]
-      .concat(toks.map((t, i) => ({ sym: t.symbol, name: S.tokInfo[t.addr.toLowerCase()]?.name || t.symbol, addr: t.addr, amt: toNum(bals[i], t.decimals), p: priceOf(t) })))
-      .filter(r => r.amt > 0);
-    rows.forEach(r => r.v = r.p != null ? r.amt * r.p : null);
-    rows.sort((a, b) => (b.v ?? -1) - (a.v ?? -1));
-    $('pfTotal').textContent = usd(rows.reduce((s, r) => s + (r.v || 0), 0));
-    $('pfList').innerHTML = rows.length ? rows.map(r => `<div class="pfRow">${av(r.sym, r.addr)}
-      <div class="main"><div>${r.name}</div><div class="sub">${fmt(r.amt)} ${r.sym}</div></div>
-      <div class="r">${r.v != null ? usd(r.v) : '<span class="sub">価格不明</span>'}</div></div>`).join('')
-      : '<div class="sub">トークンがありません。</div>';
+    draw(false);
   } catch (e) { $('pfList').innerHTML = `<div class="sub">読み込みエラー：${errMsg(e)}</div>`; }
 }
 
@@ -423,6 +429,12 @@ async function searchPairs(q) {
   } catch (e) { $('pairMsg').textContent = errMsg(e); }
   renderPairs();
 }
+// おすすめ（分析）で計算済みのプールは、目減り・作り直しコストを引いた「差し引き後」の年利も出す
+function netTag(addr) {
+  const x = A.data && Date.now() - A.data.ts < ANA_TTL ? A.data.items.find(i => i.addr === addr && !i.err && !i.short && isFinite(i.net)) : null;
+  const m = x && bestModel(x);
+  return m && isFinite(m.eff) ? `　<span class="${m.eff >= 0 ? 'good' : 'bad'}" style="font-weight:700">差し引き後 ${sgn(m.eff)}</span><span class="sub">（幅 ${wLabel(m.w)}）</span>` : '';
+}
 function renderPairs() {
   if (L.sort === 'ana') { renderAnalysis(); return; }
   const min = Number($('minTvl').value);
@@ -447,7 +459,7 @@ function renderPairs() {
         <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料率 ${feeTxt}</span>` : ''} ${warn ? `<span class="chip off" title="${warn}">⚠ 要確認</span>` : ''}
           <div class="sub" style="margin-top:4px">${p.tvl == null ? 'お気に入り' : `預け入れ総額 ${usd(p.tvl)}・24時間の取引額 ${usd(p.vol)}`}</div></div>
         <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
-      ${p.tvl == null ? '' : `<div class="bottom"><span>◆ 年利の目安: <span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(2)) + '%' : '-'}</span></span><span class="sub">${p.addr.slice(0, 8)}…</span></div>`}
+      ${p.tvl == null ? '' : `<div class="bottom"><span>◆ 手数料だけの年利: <span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(2)) + '%' : '-'}</span>${netTag(p.addr)}</span><span class="sub">${p.addr.slice(0, 8)}…</span></div>`}
     </div>`;
   }).join('');
 }
@@ -712,7 +724,8 @@ async function feeAvail(a, b) {
 const C = { a: null, b: null, fee: 3000, target: 'a', avail: null };
 function openCreate() {
   $('pickBox').style.display = 'none'; $('createBox').style.display = '';
-  if (!C.a && S.pool) { C.a = S.pool.t0; C.b = S.pool.t1; C.fee = S.pool.fee; }
+  // 開くたびに今選んでいるペアを入れ直す（前に開いたときのペアが残らないように）
+  if (S.pool) { C.a = S.pool.t0; C.b = S.pool.t1; C.fee = S.pool.fee; C.avail = null; }
   renderCreate();
 }
 function closeCreate() { $('createBox').style.display = 'none'; $('pickBox').style.display = ''; }

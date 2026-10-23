@@ -205,7 +205,7 @@ details.box summary{cursor:pointer;font-weight:600}
           <div class="tabs" id="pickTabs">
             <button data-sort="ana">⭐ おすすめ（分析）</button>
             <button data-sort="vol" class="on">取引が多い順</button>
-            <button data-sort="apr">年利の目安が高い順</button>
+            <button data-sort="apr">手数料だけの年利が高い順</button>
             <button data-sort="tvl">預け入れが多い順</button>
             <button data-sort="fav">☆ お気に入り</button>
           </div>
@@ -215,7 +215,7 @@ details.box summary{cursor:pointer;font-weight:600}
           </div>
           <div id="pairList" class="plist"><div class="empty">読み込み中…</div></div>
           <div class="row" style="margin-top:12px"><button id="btnMore">もっと読み込む</button><span id="pairMsg" class="sub"></span></div>
-          <div class="sub">一覧は、このチェーンの Uniswap（v3）のプール（2つのトークンを預ける場所）です。「年利の目安」＝24時間の取引額×手数料率÷預け入れ総額×365。プール全体の平均で、幅（レンジ）によって変わります。幅ごとの見込みは、ペアを選ぶと右に出ます。</div>
+          <div class="sub">一覧は、このチェーンの Uniswap（v3）のプール（2つのトークンを預ける場所）です。「手数料だけの年利」＝24時間の取引額×手数料率÷預け入れ総額×365（プール全体の平均）。<b>値動きによる目減りは引いていない</b>ので、必ずプラスに見えます。目減りや作り直しのコストまで引いた見込みは、ペアを選ぶと右の「この幅での見込み年利」に出ます（おすすめ（分析）で計算済みのペアは「差し引き後」も表示）。</div>
         </div>
 
         <!-- ペアを作成 -->
@@ -380,6 +380,6 @@ details.box summary{cursor:pointer;font-weight:600}
   </div>
 </div>
 
-<script src="app.js?v=20261023194651"></script>
+<script src="app.js?v=20261023202456"></script>
 </body>
 </html>
