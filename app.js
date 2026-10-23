@@ -1326,6 +1326,20 @@ async function readPosition(id) {
   } catch { pos.fees = pos.owed; }
   return pos;
 }
+// Uniswap の画面と同じ表示：ドルは $1,234.56、トークンの量は 1未満は小数3桁・1以上は小数2桁
+const usdUni = x => !isFinite(x) ? '-' : '$' + x.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const amtUni = x => !isFinite(x) ? '-' : x === 0 ? '0' : x >= 1 ? x.toLocaleString('en-US', { maximumFractionDigits: 2 }) : x >= 0.001 ? x.toFixed(3) : '<0.001';
+function uniBlock(label, total, cls, pos, a0, a1) {
+  const p0 = priceOf(pos.t0), p1 = priceOf(pos.t1);
+  const u0 = p0 != null ? a0 * p0 : null, u1 = p1 != null ? a1 * p1 : null, tot = (u0 || 0) + (u1 || 0);
+  const row = (t, u, a) => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-top:4px;text-align:left">
+    ${av(t.symbol, t.addr).replace('class="av" style="', 'class="av" style="width:18px;height:18px;font-size:7px;border:0;')}
+    <span style="min-width:64px">${u != null ? usdUni(u) : '-'}</span><span class="sub" style="flex:1">${amtUni(a)} ${t.symbol}</span>
+    <span class="sub">${tot > 0 && u != null ? (u / tot * 100).toFixed(2) + '%' : ''}</span></div>`;
+  return `<div style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;text-align:left">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="sub">${label}</span><b class="${cls}" style="font-size:16px">${total != null ? usdUni(total) : '-'}</b></div>
+    ${row(pos.t0, u0, a0)}${row(pos.t1, u1, a1)}</div>`;
+}
 function posValues(pos) {
   const a0 = pos.amt[0] / 10 ** pos.t0.decimals, a1 = pos.amt[1] / 10 ** pos.t1.decimals;
   const f0 = toNum(pos.fees[0], pos.t0.decimals), f1 = toNum(pos.fees[1], pos.t1.decimals);
@@ -1358,9 +1372,8 @@ function posHTML(pos, mine) {
     ${closed ? '' : bar}
     <div class="kv">
       <div>レンジ（${unit}）</div><div>${fmt(pl)} 〜 ${fmt(pu)}</div>
-      <div>入っている量</div><div>${fmt(v.a0)} ${pos.t0.symbol}<br>${fmt(v.a1)} ${pos.t1.symbol}</div>
-      <div>評価額</div><div><b>${v.val != null ? usd(v.val) : '-'}</b></div>
-      <div>未回収の手数料</div><div><b class="good">${v.fval != null ? usd(v.fval) : ''}</b><br><span class="sub">${fmt(v.f0)} ${pos.t0.symbol} ＋ ${fmt(v.f1)} ${pos.t1.symbol}</span></div>
+      <div style="grid-column:1/-1">${uniBlock('ポジション（評価額）', v.val, '', pos, v.a0, v.a1)}</div>
+      <div style="grid-column:1/-1">${uniBlock('未回収の手数料', v.fval, 'good', pos, v.f0, v.f1)}</div>
       ${mine ? '' : `<div>持ち主</div><div class="sub mono">${pos.owner ? pos.owner.slice(0, 10) + '…' : '-'}</div>`}
     </div>
     ${mine ? `<div class="acts">
