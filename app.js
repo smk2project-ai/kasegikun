@@ -183,9 +183,10 @@ function showView(v) {
 // ===== ウォレット =====
 async function connect() {
   if (!window.ethereum) { alert('メタマスクが見つかりません。Chromeにメタマスクを入れてください。'); return; }
+  const btn = $('btnConnect'), label = btn.textContent;
+  btn.textContent = '接続中…（メタマスクを確認）'; btn.disabled = true;
   try {
-    const bp = new ethers.BrowserProvider(window.ethereum);
-    await bp.send('eth_requestAccounts', []);
+    await window.ethereum.request({ method: 'eth_requestAccounts' });
     await ensureChain();
     S.signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
     S.account = await S.signer.getAddress();
@@ -196,7 +197,18 @@ async function connect() {
     if (S.pool) await refreshBalances();
     await loadPositions();
     loadPortfolio();
-  } catch (e) { log('接続エラー: ' + errMsg(e)); }
+  } catch (e) {
+    // 失敗の理由は画面下のログだけだと気づかれないので、その場で知らせる
+    btn.textContent = label;
+    const code = e?.code ?? e?.error?.code ?? e?.info?.error?.code;
+    const msg = code === -32002
+      ? 'メタマスクに確認画面が出たままになっています。\nChrome右上のメタマスク（キツネ）のアイコンを押して、出ている画面で「接続」や「承認」を押してください。\n（メタマスクにロックがかかっているときは、先にパスワードで開いてください）'
+      : code === 4001 || e?.code === 'ACTION_REJECTED'
+        ? 'メタマスクでキャンセルされました。もう一度「メタマスクに接続」を押してください。'
+        : '接続できませんでした：' + errMsg(e);
+    log('接続エラー: ' + msg.replace(/\n/g, ' '));
+    alert(msg);
+  } finally { btn.disabled = false; }
 }
 async function ensureChain() {
   const cur = await window.ethereum.request({ method: 'eth_chainId' });
