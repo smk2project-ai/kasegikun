@@ -28,6 +28,20 @@ const CHAINS = {
       DAI: ['0xda10009cbd5d07dd0cecc66161fc93d7c9000da1'],
     },
   },
+  base: {
+    id: 8453, hex: '0x2105', name: 'Base',
+    rpc: 'https://mainnet.base.org', explorer: 'https://basescan.org',
+    npm: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1', factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD',
+    router: '0x2626664c2603336E57B271c5C0b26F421741e481', quoter: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a',
+    weth: '0x4200000000000000000000000000000000000006',
+    gecko: 'base', geckoDex: 'uniswap-v3-base', uni: 'base',
+    favs: [{ addr: '0xd0b53d9277642d899df5c87a3966a349a798f224', name: 'WETH / USDC 0.05%' }],
+    known: {
+      WETH: ['0x4200000000000000000000000000000000000006'], USDC: ['0x833589fcd6edb6e08f4c7c32d4f71b54bda02913'],
+      USDT: ['0xfde4c96c8593536e31f229ea8f37b2ada2699bb2'], DAI: ['0x50c5725949a6f0c72e6c4a641f24049a917db0cb'],
+      CBBTC: ['0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf'],
+    },
+  },
 };
 // 使うチェーン：URLの ?chain= ＞ 前回の選択 ＞ Robinhood
 const CHAIN_KEY = (() => {
@@ -391,13 +405,13 @@ function renderPairs() {
   $('pairList').innerHTML = list.map(p => {
     const title = p.name.replace(/\s*[\d.]+%\s*$/, ''), syms = title.split(' / ');
     const feeTxt = (p.name.match(/([\d.]+%)\s*$/) || [])[1] || '';
-    const warn = [tokenWarn(p.base, syms[0]), tokenWarn(p.quote, syms[1])].filter(Boolean).join(' ／ ') || (p.tvl != null && p.tvl < LOW_TVL ? '流動性が小さいプールです' : '');
+    const warn = [tokenWarn(p.base, syms[0]), tokenWarn(p.quote, syms[1])].filter(Boolean).join(' ／ ') || (p.tvl != null && p.tvl < LOW_TVL ? '預け入れ総額が小さいプールです' : '');
     return `<div class="pcard ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}">
       <div class="top"><div class="avs">${av(syms[0] || '?', p.base || syms[0])}${av(syms[1] || '?', p.quote || syms[1])}</div>
-        <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料 ${feeTxt}</span>` : ''} ${warn ? `<span class="chip off" title="${warn}">⚠ 要確認</span>` : ''}
-          <div class="sub" style="margin-top:4px">${p.tvl == null ? 'お気に入り' : `流動性 ${usd(p.tvl)}・24h取引高 ${usd(p.vol)}`}</div></div>
+        <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料率 ${feeTxt}</span>` : ''} ${warn ? `<span class="chip off" title="${warn}">⚠ 要確認</span>` : ''}
+          <div class="sub" style="margin-top:4px">${p.tvl == null ? 'お気に入り' : `預け入れ総額 ${usd(p.tvl)}・24時間の取引額 ${usd(p.vol)}`}</div></div>
         <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
-      ${p.tvl == null ? '' : `<div class="bottom"><span>◆ 平均APR: <span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(2)) + '%' : '-'}</span></span><span class="sub">${p.addr.slice(0, 8)}…</span></div>`}
+      ${p.tvl == null ? '' : `<div class="bottom"><span>◆ 年利の目安: <span class="apr">${p.apr ? (p.apr >= 1000 ? Math.round(p.apr).toLocaleString() : p.apr.toFixed(2)) + '%' : '-'}</span></span><span class="sub">${p.addr.slice(0, 8)}…</span></div>`}
     </div>`;
   }).join('');
 }
@@ -414,7 +428,7 @@ const GAS_UNITS_REBUILD = 750000; // 閉じる＋交換＋作成のガスの目�
 const GAS_UNITS_MINT = 500000;    // 新規作成のガスの目安（使用許可は別）
 const MIN_CAPITAL = 50;           // 運用額の最低（ドル）
 const WIDTHS = [0.05, 0.1, 0.2, 0.3, 0.5, 'full'];
-const A = { busy: false, data: store.get(ANA_KEY, null), sort: 'eff',
+const A = { busy: false, data: store.get(ANA_KEY, null), sort: 'lr',
   opt: store.get('nba.anaOpt', { width: 'auto', delay: 0.5, capital: 1000 }) };
 A.opt.capital = Math.max(MIN_CAPITAL, Number(A.opt.capital) || 1000);
 function normCdf(x) { // 標準正規分布の累積（近似）
@@ -455,41 +469,75 @@ async function analyzePool(p, gasUsd) {
   return { addr: p.addr, days: closes.length, sd, sigmaY: sigmaY * 100, cv, feeApr, ilApr, net: feeApr - ilApr, out7: 2 * (1 - normCdf(z)) * 100, volUsd,
     sqrtP: Number(s0.sqrtPriceX96) / 2 ** 96, lact: Number(lact), d0: t0.decimals, d1: t1.decimals, p0: S.prices[t0a], p1: S.prices[t1a], feePct: p.fee, gasUsd };
 }
-// レンジ幅 w（±w、'full'＝全価格帯）での実質利回り（すべて年率％）
-function yieldModel(x, w, delay = A.opt.delay, C = A.opt.capital) {
+// 価格の幅 [sa, sb]（√価格・生の単位）で預けたときの実質の年利（すべて年率％）
+function modelRange(x, sa, sb, delay = A.opt.delay, C = A.opt.capital) {
   const s = x.sqrtP, k0 = 10 ** x.d0, k1 = 10 ** x.d1;
-  if (!(s > 0) || !(x.p0 > 0) || !(x.p1 > 0) || !(x.lact >= 0)) return null;
-  const sa = w === 'full' ? sqrtAt(MIN_TICK) : s * Math.sqrt(1 - w), sb = w === 'full' ? sqrtAt(MAX_TICK) : s * Math.sqrt(1 + w);
+  if (!(s > 0) || !(x.p0 > 0) || !(x.p1 > 0) || !(x.lact >= 0) || !(sb > sa)) return null;
   const usdOf = (a0, a1) => a0 / k0 * x.p0 + a1 / k1 * x.p1;
-  const v1 = usdOf((sb - s) / (s * sb), s - sa); // 流動性1のときの価値（ドル）
+  const inNow = s > sa && s < sb;
+  const v1 = s <= sa ? usdOf((sb - sa) / (sa * sb), 0) : s >= sb ? usdOf(0, sb - sa) : usdOf((sb - s) / (s * sb), s - sa); // 流動性1の価値（ドル）
   const L = C / v1, share = L / (x.lact + L);
   const feeIn = x.volUsd * x.feePct / 100 * share * 365 / C * 100;   // レンジ内にいる間の手数料（年率）
-  const conc = usdOf(L / s, L * s) / C;                               // 集中度（全価格帯で同じ流動性を持つときの価値÷運用額）
-  const ilIn = conc * (x.sd * Math.sqrt(365)) ** 2 / 8 * 100;         // レンジ内にいる間の予想ロス（年率）
+  const conc = usdOf(L / s, L * s) / C;                               // 集中度（同じ流動性を全価格帯に置いた価値÷運用額）
+  const ilIn = conc * (x.sd * Math.sqrt(365)) ** 2 / 8 * 100;         // レンジ内にいる間の値動きによる目減り（年率）
   let inPct = 1, rebuilds = 0, days = Infinity;
-  if (w !== 'full' && x.sd > 0) {
-    const b = (Math.log(1 + w) - Math.log(1 - w)) / 2;
-    days = b * b / (x.sd ** 2);                                      // レンジを外れるまでの平均日数
+  if (!inNow) { inPct = 0; days = 0; }
+  else if (x.sd > 0) {
+    const up = 2 * Math.log(sb / s), down = 2 * Math.log(s / sa);    // 上限・下限までの距離（価格の対数）
+    days = up * down / (x.sd ** 2);                                  // 外れるまでの平均日数
     inPct = days / (days + delay); rebuilds = 365 / (days + delay);
   }
-  const gasEach = (x.gasUsd || 0) / C * 100;                          // 作り直し1回のガス代（運用額に対する％）
-  const costEach = 0.5 * x.feePct + gasEach;                          // 作り直し1回のコスト（交換の手数料＋ガス代）
-  const cost = rebuilds * costEach;
-  return { w, feeIn, ilIn, inPct, rebuilds, days, cost, gasEach, gasYear: rebuilds * gasEach, eff: inPct * (feeIn - ilIn) - cost };
+  const gasEach = (x.gasUsd || 0) / C * 100;
+  const cost = rebuilds * (0.5 * x.feePct + gasEach);                // 作り直しのコスト（交換の手数料＋ガス代）
+  return { feeIn, ilIn, inPct, rebuilds, days, cost, gasEach, gasYear: rebuilds * gasEach, inNow, eff: inPct * (feeIn - ilIn) - cost };
 }
+function yieldModel(x, w, delay, C) {
+  const s = x.sqrtP;
+  const m = w === 'full' ? modelRange(x, sqrtAt(MIN_TICK), sqrtAt(MAX_TICK), delay, C) : modelRange(x, s * Math.sqrt(1 - w), s * Math.sqrt(1 + w), delay, C);
+  return m && { ...m, w };
+}
+// ローリスクの条件
+const LR = { maxSigma: 80, maxCv: 1.0, minTvl: 100000, minIn: 0.95, maxReb: 12 }; // 作り直しは月1回以下
+const AUTO_WIDTHS = [0.1, 0.2, 0.3, 0.5, 'full']; // 自動で選ぶ幅（±5%は外れやすいので候補にしない）
+const fitsRange = m => m && m.inPct >= LR.minIn && m.rebuilds <= LR.maxReb;
+// 幅：自動なら「レンジ内95%以上・作り直し月1回以下」を満たす幅の中で、実質の年利が一番高いもの
 function bestModel(x) {
   if (A.opt.width !== 'auto') return yieldModel(x, A.opt.width === 'full' ? 'full' : Number(A.opt.width));
-  return WIDTHS.map(w => yieldModel(x, w)).filter(Boolean).reduce((a, b) => (b.eff > (a?.eff ?? -Infinity) ? b : a), null);
+  const ok = AUTO_WIDTHS.map(w => yieldModel(x, w)).filter(fitsRange);
+  return ok.length ? ok.reduce((a, b) => (b.eff > a.eff ? b : a)) : yieldModel(x, 'full');
 }
 const wLabel = w => w === 'full' ? 'フルレンジ' : `±${Math.round(w * 100)}%`;
-const stability = cv => cv < 0.6 ? ['高', 'good'] : cv < 1.2 ? ['中', ''] : ['低', 'bad'];
+const stability = cv => cv < 0.6 ? ['高', 'good'] : cv < 1.0 ? ['中', ''] : ['低', 'bad'];
+const daysTxt = d => !isFinite(d) ? 'ほぼ外れない' : d >= 60 ? `約${Math.round(d / 30)}か月に1回` : d >= 14 ? `約${Math.round(d / 7)}週間に1回` : `約${d.toFixed(d < 3 ? 1 : 0)}日に1回`;
+// ローリスク・ハイリターンの判定と、その理由
+function judge(x, m) {
+  const r = [], add = (c, t) => r.push({ c, t });
+  if (x.sigmaY <= 50) add('ok', `値動きがとても小さい（1年で約${Math.round(x.sigmaY)}%）`);
+  else if (x.sigmaY <= LR.maxSigma) add('ok', `値動きが小さめ（1年で約${Math.round(x.sigmaY)}%）`);
+  else add('ng', `値動きが大きい（1年で約${Math.round(x.sigmaY)}%）`);
+  if (x.cv < 0.6) add('ok', '毎日の取引額が安定している');
+  else if (x.cv < LR.maxCv) add('wa', '取引額は日によって多少ばらつく');
+  else add('ng', '日によって取引額のばらつきが大きい');
+  if (x.tvl >= 1e6) add('ok', `預け入れ総額がとても大きい（${usd(x.tvl)}）`);
+  else if (x.tvl >= LR.minTvl) add('ok', `預け入れ総額が大きい（${usd(x.tvl)}）`);
+  else add('ng', `預け入れ総額が小さい（${usd(x.tvl)}）`);
+  if (fitsRange(m)) add('ok', `${wLabel(m.w)}の幅なら、レンジ内にいる時間は約${Math.round(m.inPct * 100)}%・作り直しは${daysTxt(m.days)}`);
+  else add('ng', `${wLabel(m.w)}の幅では、レンジを外れやすい（作り直し${daysTxt(m.days)}）`);
+  if (m.eff <= 0) add('ng', '実質の年利がマイナス（手数料より目減りの方が大きい）');
+  else if (m.eff < 10) add('wa', '年利は控えめ');
+  else if (m.eff >= 50) add('ok', '実質の年利が高い');
+  const pass = x.sigmaY <= LR.maxSigma && x.cv < LR.maxCv && x.tvl >= LR.minTvl && fitsRange(m) && m.eff > 0;
+  return { pass, reasons: r };
+}
 async function runAnalysis() {
   if (A.busy) return; A.busy = true;
   try {
     while (L.pools.length < 80 && L.page < 4) await loadMorePairs(); // 候補を増やす
     const min = Math.max(Number($('minTvl').value), ANA_MIN_TVL);
-    const cand = L.pools.filter(p => p.tvl >= min && p.fee && p.base && p.quote && !tokenWarn(p.base) && !tokenWarn(p.quote))
-      .sort((a, b) => b.apr - a.apr).slice(0, ANA_N);
+    const ok = L.pools.filter(p => p.tvl >= min && p.fee && p.base && p.quote && !tokenWarn(p.base) && !tokenWarn(p.quote));
+    // 候補：年利の目安が高い12件 ＋ 預け入れ総額が大きい12件（大きくて安定したプールも入れる）
+    const pick = (k) => [...ok].sort((a, b) => b[k] - a[k]).slice(0, 12);
+    const cand = [...new Map([...pick('apr'), ...pick('tvl')].map(p => [p.addr, p])).values()];
     let gasUsd = 0;
     try { const f = await retry(() => rpc.getFeeData()); gasUsd = Number(ethers.formatEther((f.gasPrice ?? 0n) * BigInt(GAS_UNITS_REBUILD))) * (priceOf(WETH) || 0); } catch {}
     const items = [];
@@ -504,62 +552,95 @@ async function runAnalysis() {
 }
 const pct = (x, d = 1) => isFinite(x) ? x.toFixed(d) + '%' : '-';
 const sgn = (x, d = 1) => isFinite(x) ? (x >= 0 ? '+' : '') + x.toFixed(d) + '%' : '-';
+function anaCard(p, i, showRank) {
+  const title = p.name.replace(/\s*[\d.]+%\s*$/, ''), syms = title.split(' / '), feeTxt = (p.name.match(/([\d.]+%)\s*$/) || [])[1] || '';
+  const m = p.m, [stTxt, stCls] = stability(p.cv), sel = S.pool?.addr?.toLowerCase();
+  return `<div class="pcard ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}" data-w="${m.w}">
+    <div class="top">${showRank ? `<span class="chip ${i < 3 ? 'on' : ''}">${i + 1}位</span>` : ''}<div class="avs">${av(syms[0] || '?', p.base || syms[0])}${av(syms[1] || '?', p.quote || syms[1])}</div>
+      <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料率 ${feeTxt}</span>` : ''}${p.days < 20 ? ' <span class="chip">データ少なめ</span>' : ''}
+        <div class="sub" style="margin-top:4px">預け入れ総額 ${usd(p.tvl)}・30日平均の取引額 ${usd(p.volUsd)}/日</div></div>
+      <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
+    <div class="effRow"><div><small>実質の年利（幅 ${wLabel(m.w)} で運用した場合）</small><b class="${m.eff >= 0 ? 'good' : 'bad'}">${sgn(m.eff)}</b></div>
+      <div class="sub">月あたり 約${sgn(m.eff / 12)}<br>作り直し ${daysTxt(m.days)}</div></div>
+    <ul class="reasons">${p.j.reasons.map(r => `<li class="${r.c}">${r.t}</li>`).join('')}</ul>
+    <details style="margin-top:8px"><summary class="sub" style="cursor:pointer">くわしい数字</summary>
+      <div class="metrics m4">
+        <div><small>手数料（レンジ内・年率）</small><b class="good">${pct(m.feeIn)}</b></div>
+        <div><small>値動きによる目減り（年率）</small><b class="bad">${pct(m.ilIn)}</b></div>
+        <div><small>レンジ内にいる時間</small><b>${pct(m.inPct * 100, 0)}</b></div>
+        <div><small>作り直しのコスト（年）</small><b class="bad">${pct(m.cost)}</b><small>うちガス代 ${pct(m.gasYear, m.gasYear < 1 ? 2 : 1)}</small></div>
+        <div><small>1年あたりの値動き</small><b>${pct(p.sigmaY, 0)}</b></div>
+        <div><small>取引額の安定度</small><b class="${stCls}">${stTxt}</b></div>
+        <div><small>作り直し（年）</small><b>${m.rebuilds < 1 ? '1回未満' : Math.round(m.rebuilds) + '回'}</b></div>
+        <div><small>ガス代（作り直し1回）</small><b>約$${(p.gasUsd || 0).toFixed(3)}</b><small>運用額の ${pct(m.gasEach, m.gasEach < 0.1 ? 3 : 2)}</small></div>
+      </div></details></div>`;
+}
 function renderAnalysis() {
   $('btnMore').style.display = 'none';
-  const head = `<div class="anaHead"><b style="color:var(--text)">分析順の見方（数字はすべて年率。月あたりは約12分の1）</b><br>
-    <b>実質利回り</b>＝レンジ内にいられる時間の割合 ×（レンジ内の手数料 − レンジ内の予想ロス）− 作り直しのコスト。過去30日の値動き・取引高と、今の流動性から計算します。
-    「安定重視」は、値動きが大きすぎず（変動率100%未満）、取引高が安定していて（安定度「中」以上）、実質利回りがプラスのペアだけを並べます。
-    <b>過去のデータからの見積もりで、将来の利益を保証するものではありません。</b>対象は流動性 $5万以上・「⚠ 要確認」のないペアのうち、平均APRの高い上位${ANA_N}件です。</div>`;
+  const head = `<div class="anaHead"><b style="color:var(--text)">おすすめ（分析）の見方</b><br>
+    過去30日の値動き・取引額と、今の預け入れ状況から計算します。<b>① リスクが低いペアだけに絞り</b>（値動きが1年で${LR.maxSigma}%以下・取引額が安定・預け入れ総額${usd(LR.minTvl)}以上・その幅でレンジ内にいる時間${LR.minIn * 100}%以上で作り直しは月1回以下）、
+    <b>② その中で「実質の年利」が高い順</b>に並べます。実質の年利＝レンジ内にいる時間の割合×（手数料 − 値動きによる目減り）− 作り直しのコスト（すべて年率、月あたりは約12分の1）。
+    条件から外れるペアは「ハイリスク（参考）」に分けています。<b>過去のデータからの見積もりで、将来の利益を約束するものではありません。</b></div>`;
   if (A.busy) { $('pairList').innerHTML = head + `<div class="empty" id="anaMsg">${A.progress || '分析しています…'}</div>`; return; }
   const d = A.data;
   if (!d || Date.now() - d.ts > ANA_TTL) {
     $('pairList').innerHTML = head + `<div class="empty">${d ? '前回の分析から1日以上たっています。' : 'まだ分析していません。'}<br><br><button class="primary" id="btnAna">分析する（数分かかります）</button></div>`;
     $('btnAna').onclick = runAnalysis; return;
   }
-  let items = d.items.filter(x => !x.err && !x.short && isFinite(x.net)).map(x => ({ ...x, m: bestModel(x) })).filter(x => x.m && isFinite(x.m.eff));
-  const skipped = d.items.length - items.length;
-  if (A.sort === 'safe') items = items.filter(x => x.sigmaY < 100 && x.cv < 1.2 && x.m.eff > 0);
-  items.sort((a, b) => A.sort === 'vol' ? a.sigmaY - b.sigmaY : A.sort === 'net' ? b.net - a.net : b.m.eff - a.m.eff);
-  const sel = S.pool?.addr?.toLowerCase();
-  $('pairMsg').textContent = `分析日時 ${new Date(d.ts).toLocaleString('ja-JP')}　${items.length}件${skipped ? `（データ不足で除外 ${skipped}件）` : ''}`;
+  const all = d.items.filter(x => !x.err && !x.short && isFinite(x.net)).map(x => { const m = bestModel(x); return m && isFinite(m.eff) ? { ...x, m, j: judge(x, m) } : null; }).filter(Boolean);
+  const skipped = d.items.length - all.length;
+  $('pairMsg').textContent = `分析日時 ${new Date(d.ts).toLocaleString('ja-JP')}　${all.length}件${skipped ? `（データ不足で除外 ${skipped}件）` : ''}`;
   const o = A.opt, opt = (v, l, cur) => `<option value="${v}" ${String(cur) === String(v) ? 'selected' : ''}>${l}</option>`;
   const controls = `<div class="row" style="margin:10px 0 6px;gap:6px">
-      <label class="sub">レンジ幅 <select id="anaW">${opt('auto', '一番良い幅を自動で', o.width)}${[0.05, 0.1, 0.2, 0.3, 0.5].map(w => opt(w, wLabel(w), o.width)).join('')}${opt('full', 'フルレンジ', o.width)}</select></label>
-      <label class="sub">作り直すまで <select id="anaD">${opt(0.1, 'すぐ（ほぼ自動）', o.delay)}${opt(0.5, '半日以内', o.delay)}${opt(1, '1日以内', o.delay)}${opt(2, '2日以内', o.delay)}</select></label>
-      <label class="sub">運用額 $<input id="anaC" type="number" min="${MIN_CAPITAL}" step="1" value="${o.capital}" style="width:110px;padding:7px 8px" title="$${MIN_CAPITAL}以上で自由に入力（入力後にEnterか、ほかの場所を押すと計算し直します）"></label></div>`;
+      <label class="sub">幅 <select id="anaW">${opt('auto', '条件内で一番良い幅（おすすめ）', o.width)}${[0.05, 0.1, 0.2, 0.3, 0.5].map(w => opt(w, wLabel(w), o.width)).join('')}${opt('full', 'フルレンジ', o.width)}</select></label>
+      <label class="sub">外れてから作り直すまで <select id="anaD">${opt(0.1, 'すぐ', o.delay)}${opt(0.5, '半日以内', o.delay)}${opt(1, '1日以内', o.delay)}${opt(2, '2日以内', o.delay)}</select></label>
+      <label class="sub">運用額 $<input id="anaC" type="number" min="${MIN_CAPITAL}" step="1" value="${o.capital}" style="width:100px;padding:7px 8px" title="$${MIN_CAPITAL}以上で自由に入力（Enterで計算し直します）"></label></div>`;
   const tabs = `<div class="row between" style="margin:0 0 10px"><div class="tabs" style="margin:0">
-      <button data-asort="eff" class="${A.sort === 'eff' ? 'on' : ''}">実質利回り順</button>
-      <button data-asort="safe" class="${A.sort === 'safe' ? 'on' : ''}">安定重視</button>
-      <button data-asort="net" class="${A.sort === 'net' ? 'on' : ''}">差し引き順</button>
+      <button data-asort="lr" class="${A.sort === 'lr' ? 'on' : ''}">ローリスク・ハイリターン順</button>
+      <button data-asort="eff" class="${A.sort === 'eff' ? 'on' : ''}">実質の年利順（リスク含む）</button>
       <button data-asort="vol" class="${A.sort === 'vol' ? 'on' : ''}">値動きの小さい順</button></div><button id="btnAna">分析し直す</button></div>`;
-  $('pairList').innerHTML = head + controls + tabs + (items.length ? items.map((p, i) => {
-    const title = p.name.replace(/\s*[\d.]+%\s*$/, ''), syms = title.split(' / '), feeTxt = (p.name.match(/([\d.]+%)\s*$/) || [])[1] || '';
-    const m = p.m, [stTxt, stCls] = stability(p.cv);
-    return `<div class="pcard ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}">
-      <div class="top"><span class="chip ${i < 3 ? 'on' : ''}">${i + 1}</span><div class="avs">${av(syms[0] || '?', p.base || syms[0])}${av(syms[1] || '?', p.quote || syms[1])}</div>
-        <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料 ${feeTxt}</span>` : ''}${p.days < 20 ? ' <span class="chip">データ少なめ</span>' : ''}${p.sigmaY >= 100 ? ' <span class="chip off" title="1年あたりの値動きが100%以上。レンジを外れやすい">値動き大</span>' : ''}${p.cv >= 1.2 ? ' <span class="chip off" title="日ごとの取引高のばらつきが大きい">取引高が不安定</span>' : ''}
-          <div class="sub" style="margin-top:4px">流動性 ${usd(p.tvl)}・30日平均の取引高 ${usd(p.volUsd)}/日</div></div>
-        <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
-      <div class="effRow"><div><small>実質利回り（年率・幅 ${wLabel(m.w)} で計算）</small><b class="${m.eff >= 0 ? 'good' : 'bad'}">${sgn(m.eff)}</b></div>
-        <div class="sub">月あたり約 ${sgn(m.eff / 12)}<br>作り直し 年${m.rebuilds < 1 ? '1回未満' : Math.round(m.rebuilds) + '回'}（平均${isFinite(m.days) ? m.days.toFixed(m.days < 10 ? 1 : 0) + '日' : '-'}で外れる）</div></div>
-      <div class="metrics m4">
-        <div><small>手数料（レンジ内）</small><b class="good">${pct(m.feeIn)}</b></div>
-        <div><small>予想ロス（レンジ内）</small><b class="bad">${pct(m.ilIn)}</b></div>
-        <div><small>レンジ内にいる時間</small><b>${pct(m.inPct * 100, 0)}</b></div>
-        <div><small>作り直しのコスト（年）</small><b class="bad">${pct(m.cost)}</b><small>うちガス代 ${pct(m.gasYear, m.gasYear < 1 ? 2 : 1)}</small></div>
-        <div><small>変動率（年）</small><b>${pct(p.sigmaY, 0)}</b></div>
-        <div><small>取引高の安定度</small><b class="${stCls}">${stTxt}</b></div>
-        <div><small>差し引き（全価格帯）</small><b class="${p.net >= 0 ? 'good' : 'bad'}">${sgn(p.net)}</b></div>
-        <div><small>ガス代（作り直し1回）</small><b>約$${(p.gasUsd || 0).toFixed(3)}</b><small>運用額の ${pct(m.gasEach, m.gasEach < 0.1 ? 3 : 2)}</small></div>
-      </div></div>`;
-  }).join('') : `<div class="empty">${A.sort === 'safe' ? '条件に合うペアがありません（値動きが大きいか、取引高が不安定か、実質利回りがマイナス）。' : '該当するペアがありません'}</div>`);
+  let body;
+  if (A.sort === 'lr') {
+    const good = all.filter(x => x.j.pass).sort((a, b) => b.m.eff - a.m.eff);
+    const risky = all.filter(x => !x.j.pass && x.m.eff > 0).sort((a, b) => b.m.eff - a.m.eff).slice(0, 5);
+    body = (good.length ? good.map((p, i) => anaCard(p, i, true)).join('') : '<div class="empty">今は条件に合うペアがありません。</div>')
+      + (risky.length ? `<div class="sec">ハイリスク（参考）：年利は高いが、リスクの条件を満たさないペア</div>` + risky.map((p, i) => anaCard(p, i, false)).join('') : '');
+  } else {
+    const list = [...all].sort((a, b) => A.sort === 'vol' ? a.sigmaY - b.sigmaY : b.m.eff - a.m.eff);
+    body = list.map((p, i) => anaCard(p, i, true)).join('');
+  }
+  $('pairList').innerHTML = head + controls + tabs + body;
   $('btnAna').onclick = runAnalysis;
   document.querySelectorAll('[data-asort]').forEach(b => b.onclick = e => { e.stopPropagation(); A.sort = b.dataset.asort; renderAnalysis(); });
   const saveOpt = () => {
     const c = Math.max(MIN_CAPITAL, Math.round(Number($('anaC').value) || 0)); // 運用額は $50 以上
-    A.opt = { width: $('anaW').value, delay: Number($('anaD').value), capital: c }; store.set('nba.anaOpt', A.opt); renderAnalysis();
+    A.opt = { width: $('anaW').value, delay: Number($('anaD').value), capital: c }; store.set('nba.anaOpt', A.opt); renderAnalysis(); renderRangeYield();
   };
   ['anaW', 'anaD', 'anaC'].forEach(id => { $(id).onchange = saveOpt; $(id).onclick = e => e.stopPropagation(); });
+}
+// 預ける画面：今の幅での見込み年利と、幅ごとの比較（Smart Vault の「全てのレンジを見る」にあたる）
+function renderRangeYield() {
+  const P = S.pool, el = $('rangeYield'); if (!P || !el) return;
+  const x = P.stats;
+  if (!x) { el.innerHTML = '<span class="sub">この幅での見込み年利を計算中…（過去30日のデータを取得しています）</span>'; return; }
+  if (x.short) { el.innerHTML = '<span class="sub">過去のデータが足りないため、見込み年利を出せません。</span>'; return; }
+  const T = getTicks(); if (!T) { el.innerHTML = ''; return; }
+  const g = gasUsdOf(GAS_UNITS_REBUILD); if (g != null) x.gasUsd = g;
+  const C = Math.max(MIN_CAPITAL, Number($('totalUsd').value) || A.opt.capital);
+  const cur = modelRange(x, sqrtAt(T[0]), sqrtAt(T[1]), A.opt.delay, C);
+  if (!cur) { el.innerHTML = '<span class="sub">トークンのドル価格が分からないため、見込み年利を出せません。</span>'; return; }
+  const rows = WIDTHS.map(w => yieldModel(x, w, A.opt.delay, C)).filter(Boolean);
+  const mr = Number($('maxR').value), nr = Number($('minR').value);
+  const curW = S.full ? 'full' : (mr > 0 && Math.abs(mr - nr) < 0.01 ? String(mr / 100) : null);
+  el.innerHTML = (cur.inNow ? `<div class="row between" style="margin:0"><b>この幅での見込み年利</b><b class="${cur.eff >= 0 ? 'good' : 'bad'}" style="font-size:20px">${sgn(cur.eff)}</b></div>
+      <div class="sub">月あたり 約${sgn(cur.eff / 12)}・レンジ内にいる時間 約${Math.round(cur.inPct * 100)}%・作り直し ${daysTxt(cur.days)}<br>
+      内訳：手数料 +${pct(cur.feeIn * cur.inPct)}／値動きによる目減り −${pct(cur.ilIn * cur.inPct)}／作り直しのコスト −${pct(cur.cost)}（運用額 $${Math.round(C).toLocaleString()} で計算）</div>`
+      : '<b class="warn">今の価格がこの幅の外です（このままでは手数料が入りません）</b>')
+    + `<table class="wtbl"><tr><th>幅</th><th>見込み年利</th><th>レンジ内</th><th>作り直し</th><th></th></tr>
+      ${rows.map(m => `<tr data-w="${m.w}" class="${curW === String(m.w) ? 'cur' : ''}"><td>${wLabel(m.w)}</td><td class="${m.eff >= 0 ? 'good' : 'bad'}">${sgn(m.eff)}</td>
+        <td>${Math.round(m.inPct * 100)}%</td><td>${m.rebuilds < 1 ? '年1回未満' : '年' + Math.round(m.rebuilds) + '回'}</td><td>${fitsRange(m) ? '<span class="good">✓ 外れにくい</span>' : ''}</td></tr>`).join('')}</table>
+      <div class="sub" style="margin-top:4px">行を押すとその幅にします。過去30日の値動き・取引額からの見積もりで、将来を約束するものではありません。</div>`;
+  el.querySelectorAll('tr[data-w]').forEach(tr => tr.onclick = () => { const w = tr.dataset.w; $('pctIn').value = ''; setRangePct(w === 'full' ? 'full' : Math.round(Number(w) * 100)); });
 }
 
 // ===== 手数料レベル（カード） =====
@@ -567,7 +648,8 @@ function renderAnalysis() {
 function feeCards(selFee, avail) {
   return FEE_LEVELS.map(f => {
     const a = avail ? avail[f.fee] : undefined;
-    const info = a === undefined ? '' : a === null ? '<em class="sub">プールなし</em>' : `<em class="good">${a.tvl != null ? '流動性 ' + usd(a.tvl) : 'プールあり'}</em>`;
+    const info = a === undefined ? '' : a === null ? '<em class="sub">プールなし</em>'
+      : `<em class="good">${a.tvl != null ? '預け入れ ' + usd(a.tvl) : 'プールあり'}${a.apr ? `<br>年利の目安 ${a.apr >= 1000 ? Math.round(a.apr).toLocaleString() : a.apr.toFixed(1)}%` : ''}</em>`;
     return `<button class="fee ${f.fee === selFee ? 'on' : ''} ${a === null ? 'none' : ''}" data-fee="${f.fee}" title="${f.ex}">
       <b>${f.label}</b><span>${f.desc}</span>${info}</button>`;
   }).join('');
@@ -579,7 +661,7 @@ async function feeAvail(a, b) {
     const p = (await factoryR.getPool(t0, t1, f.fee)).toLowerCase();
     if (p === ethers.ZeroAddress) { out[f.fee] = null; return; }
     const known = [...L.pools, ...(L.search || [])].find(x => x.addr === p);
-    out[f.fee] = { addr: p, tvl: known ? known.tvl : null };
+    out[f.fee] = { addr: p, tvl: known ? known.tvl : null, apr: known ? known.apr : null };
   }));
   return out;
 }
@@ -681,7 +763,8 @@ async function loadPool(a, b, fee, expectAddr) {
     S.invert = stable(t0) && !stable(t1); // ドル建てが単位側に来るように
     S.lastEdited = 0; $('amt0').value = ''; $('amt1').value = '';
     $('poolMsg').textContent = '';
-    $('pairName').textContent = `${t0.symbol}/${t1.symbol} に流動性を提供`;
+    $('pairName').textContent = `${t0.symbol} と ${t1.symbol} を預ける`;
+    S.pool.stats = null; $('totalUsd').value = '';
     $('btnFav').textContent = isFav(addr) ? '★' : '☆'; $('btnFav').classList.toggle('on', isFav(addr));
     renderPairs();
     $('poolInfo').style.display = '';
@@ -707,8 +790,8 @@ async function loadPoolDetail() {
   $('poolSub').innerHTML = `プール <a href="${CHAIN.explorer}/address/${P.addr}" target="_blank" class="mono">${P.addr.slice(0, 10)}…</a>　手数料 ${P.fee / 10000}%　ティック間隔 ${P.spacing}`;
   try {
     const [r0, r1] = await Promise.all([P.t0, P.t1].map(t => new ethers.Contract(t.addr, ERC20_ABI, rpc).balanceOf(P.addr)));
-    let g = null;
-    try { g = (await gecko(`/networks/${CHAIN.gecko}/pools/${P.addr.toLowerCase()}?include=base_token,quote_token`)).data.attributes; } catch {}
+    let g = null, gj = null;
+    try { gj = (await gecko(`/networks/${CHAIN.gecko}/pools/${P.addr.toLowerCase()}?include=base_token,quote_token`)).data; g = gj.attributes; } catch {}
     if (S.pool !== P) return;
     const a0 = toNum(r0, P.t0.decimals), a1 = toNum(r1, P.t1.decimals);
     const p0 = priceOf(P.t0), p1 = priceOf(P.t1);
@@ -717,17 +800,23 @@ async function loadPoolDetail() {
     const apr = tvl > 0 && isFinite(vol) ? vol * (P.fee / 10000) / tvl * 365 : NaN;
     P.tvl = isFinite(tvl) ? tvl : null; renderPoolWarn(P.tvl);
     $('poolDetail').innerHTML = `
-      <div>流動性合計</div><div>${usd(tvl)}</div>
-      <div>24h取引高</div><div>${usd(vol)}</div>
-      <div>平均APR（推定）</div><div class="apr">${isFinite(apr) ? apr.toFixed(2) + '%' : '-'}</div>
+      <div>預け入れ総額</div><div>${usd(tvl)}</div>
+      <div>24時間の取引額</div><div>${usd(vol)}</div>
+      <div>年利の目安（全体平均）</div><div class="apr">${isFinite(apr) ? apr.toFixed(2) + '%' : '-'}</div>
       <div>${P.t0.symbol}</div><div>${fmt(a0)}　<span class="sub">${p0 != null ? usd(a0 * p0) : ''}</span></div>
       <div>${P.t1.symbol}</div><div>${fmt(a1)}　<span class="sub">${p1 != null ? usd(a1 * p1) : ''}</span></div>`
       + (() => { const x = A.data?.items?.find(i => i.addr === P.addr.toLowerCase() && isFinite(i.net)); return x ? `
-      <div>変動率（年・30日）</div><div>${pct(x.sigmaY, 0)}</div>
-      <div>予想ロス（年）</div><div class="bad">${pct(x.ilApr)}</div>
-      <div>差し引き（分析・年率）</div><div class="${x.net >= 0 ? 'good' : 'bad'}">${x.net >= 0 ? '+' : ''}${pct(x.net)}</div>`
-      + (() => { const m = bestModel(x); return m ? `<div>実質利回り（年率）</div><div class="${m.eff >= 0 ? 'good' : 'bad'}">${sgn(m.eff)}（幅 ${wLabel(m.w)}）</div>` : ''; })() : ''; })();
+      <div>1年あたりの値動き（30日から）</div><div>${pct(x.sigmaY, 0)}</div>`
+      + (() => { const m = bestModel(x); return m ? `<div>おすすめ分析の実質の年利</div><div class="${m.eff >= 0 ? 'good' : 'bad'}">${sgn(m.eff)}（幅 ${wLabel(m.w)}）</div>` : ''; })() : ''; })();
     renderUsd();
+    // 幅ごとの見込み年利のための統計（30日の値動き・取引額・今の流動性）
+    const rel = id => gj?.relationships?.[id]?.data?.id?.split('_').pop()?.toLowerCase();
+    if (gj && rel('base_token') && rel('quote_token')) {
+      try {
+        const st = await analyzePool({ addr: P.addr.toLowerCase(), base: rel('base_token'), quote: rel('quote_token'), fee: P.fee / 10000, tvl }, gasUsdOf(GAS_UNITS_REBUILD) || 0);
+        if (S.pool === P) { P.stats = st; renderRangeYield(); }
+      } catch { if (S.pool === P) $('rangeYield').innerHTML = '<span class="sub">見込み年利を計算できませんでした。</span>'; }
+    } else $('rangeYield').innerHTML = '<span class="sub">このプールは値動きのデータがないため、見込み年利を出せません。</span>';
   } catch (e) { $('poolDetail').innerHTML = `<div>読み込みエラー</div><div>${errMsg(e)}</div>`; }
 }
 // 人が見る価格（1 t0 = ? t1）
@@ -788,6 +877,7 @@ function updateRange() {
   if ($('amt0').disabled) $('amt0').value = '';
   if ($('amt1').disabled) $('amt1').value = '';
   renderRatio(T);
+  renderRangeYield();
   syncAmounts(S.lastEdited ?? 0);
 }
 // このレンジで入れるときの、トークンの割合（価値ベース）
@@ -810,6 +900,75 @@ function syncAmounts(i) {
   }
   renderUsd();
 }
+// 合計額（ドル）→ 今の幅の割合で2つのトークンに分ける
+function splitTotal() {
+  const P = S.pool, T = getTicks(), total = Number($('totalUsd').value);
+  if (!P || !T || !(total > 0)) return;
+  const p0 = priceOf(P.t0), p1 = priceOf(P.t1);
+  if (p0 == null || p1 == null) { $('needBox').innerHTML = '<span class="warn">トークンのドル価格がまだ分からないため、分けられません。少し待ってからもう一度。</span>'; return; }
+  const s0 = shareOf0(T);
+  if (!$('amt0').disabled && s0 > 0) { $('amt0').value = Number((total * s0 / p0).toPrecision(8)); S.lastEdited = 0; syncAmounts(0); }
+  else { $('amt1').value = Number((total * (1 - s0) / p1).toPrecision(8)); S.lastEdited = 1; syncAmounts(1); }
+}
+// このレンジで預けるときの token0 の価値の割合
+function shareOf0(T) {
+  const P = S.pool, [tl, tu] = T, sp = P.sqrtP, sa = sqrtAt(tl), sb = sqrtAt(tu), price = sp * sp;
+  if (sp <= sa) return 1; if (sp >= sb) return 0;
+  const R = (sp - sa) * sp * sb / (sb - sp); return 1 / (1 + R / price);
+}
+// 必要なもの（どのチェーンの、どのトークンを、いくつ）と、足りているか
+function renderNeed() {
+  const P = S.pool; if (!P) return;
+  const [a0, a1] = desiredAmounts(P, $('amt0').value, $('amt1').value);
+  if (a0 === 0n && a1 === 0n) { $('needBox').innerHTML = `<span class="sub">必要なもの：<b>${CHAIN.name}</b> の ${showName(P.t0)} と ${showName(P.t1)}、ガス代用のETHを少し</span>`; return; }
+  const row = (i, a) => {
+    const t = i ? P.t1 : P.t0, nm = showName(t);
+    if (a === 0n) return '';
+    const have = S.bal ? spendable(i) : null;
+    const st = have == null ? '<span class="sub">（つなぐと確認できます）</span>'
+      : have >= a ? '<span class="good">✓ 足りています</span>'
+      : `<span class="bad">あと ${fmt(toNum(a - have, t.decimals))} 足りません</span>`;
+    return `<span>${nm}</span><b>${fmt(toNum(a, t.decimals))}</b>${st}`;
+  };
+  const gas = gasUsdOf(GAS_UNITS_MINT);
+  let html = `<div class="sub" style="margin-bottom:6px">必要なもの（<b>${CHAIN.name}</b> のウォレットに）</div><div class="need">${row(0, a0)}${row(1, a1)}
+    <span>ガス代用のETH</span><b>少し</b><span class="sub">${gas != null ? `1回 約$${gas.toFixed(3)}` : ''}</span></div>`;
+  // 片方が足りないが、もう片方が多ければ「自動で交換して預ける」
+  if (S.bal) {
+    const h0 = spendable(0), h1 = spendable(1), price = P.sqrtP ** 2;
+    const short = h0 < a0 || h1 < a1;
+    const enough = Number(h0) + Number(h1) / price >= (Number(a0) + Number(a1) / price) * 1.02; // 交換の目減り分の余裕
+    if (short && enough) html += `<button class="primary" id="btnAuto" style="width:100%;margin-top:10px">足りない分を自動で交換して預ける</button>
+      <div class="sub" style="margin-top:4px">持っているもう片方のトークンを、一番得なプールで必要な分だけ交換してから預けます（メタマスクの承認が2〜4回出ます）。</div>`;
+    else if (short) html += '<div class="bad" style="margin-top:8px">2つのトークンを合わせても足りません。額を減らすか、トークンを用意してください。</div>';
+  }
+  $('needBox').innerHTML = html;
+  if ($('btnAuto')) $('btnAuto').onclick = autoProvide;
+}
+const showName = t => t.isWeth && $('payEth').checked ? 'ETH（WETHとして預けます）' : t.symbol;
+async function autoProvide() {
+  const btn = $('btnAuto'); if (btn) btn.disabled = true;
+  try {
+    await signerReady(); await refreshBalances();
+    const P = S.pool, [a0, a1] = desiredAmounts(P, $('amt0').value, $('amt1').value);
+    const h0 = spendable(0), h1 = spendable(1), price = P.sqrtP ** 2;
+    // 足りない側の量を、多い側から交換して作る（目減り分 3% 上乗せ）
+    let from, amountIn;
+    if (h1 < a1) { from = 0; amountIn = floorBig(Number(a1 - h1) / price * 1.03); if (h0 - amountIn < a0 * 97n / 100n) throw new Error('交換すると、もう片方が足りなくなります'); }
+    else if (h0 < a0) { from = 1; amountIn = floorBig(Number(a0 - h0) * price * 1.03); if (h1 - amountIn < a1 * 97n / 100n) throw new Error('交換すると、もう片方が足りなくなります'); }
+    else { await mint(); return; }
+    const inTok = from === 0 ? P.t0 : P.t1, outTok = from === 0 ? P.t1 : P.t0;
+    log(`自動で交換：${fmt(toNum(amountIn, inTok.decimals))} ${inTok.symbol} → ${outTok.symbol}`);
+    const q = await bestQuote(inTok, outTok, amountIn);
+    S.swapPlan = { inTok, outTok, amountIn, out: q.out, from, u0: h0, u1: h1, fee: q.fee };
+    if (!(await doSwap())) throw new Error('交換で止まりました');
+    await refreshBalances();
+    const n0 = spendable(0), n1 = spendable(1);
+    fillAfterSwap(n0 < a0 ? n0 : a0, n1 < a1 ? n1 : a1); // 目標額の範囲で、比率どおりに入れ直す
+    await mint();
+  } catch (e) { log('自動で預ける：' + errMsg(e)); }
+  finally { if (btn) btn.disabled = false; }
+}
 function renderUsd() {
   if (!S.pool) return;
   const v = i => { const t = i ? S.pool.t1 : S.pool.t0, p = priceOf(t), a = Number($('amt' + i).value) || 0; return p != null ? a * p : null; };
@@ -817,6 +976,8 @@ function renderUsd() {
   $('usd0').textContent = u0 != null ? usd(u0) : '$-'; $('usd1').textContent = u1 != null ? usd(u1) : '$-';
   const total = u0 != null && u1 != null ? u0 + u1 : null;
   $('usdTotal').textContent = total != null ? usd(total) : '-';
+  if (document.activeElement !== $('totalUsd')) $('totalUsd').value = total > 0 ? Number(total.toFixed(2)) : '';
+  renderNeed();
   // ガス代の目安（入れる額に対する割合）
   const gm = gasUsdOf(GAS_UNITS_MINT), gr = gasUsdOf(GAS_UNITS_REBUILD);
   const share = g => total > 0 && g != null ? `（${(g / total * 100).toFixed(g / total * 100 < 0.1 ? 3 : 2)}%）` : '';
@@ -861,6 +1022,20 @@ function planSwap(h0, h1) {
   if (h0 > a0) return { from: 0, amount: h0 - a0 };
   return { from: 1, amount: (a0 - h0) * price };
 }
+// 同じトークンの組み合わせのプール（手数料率ちがい）を全部見積もって、一番多く受け取れるものを使う
+async function bestQuote(inTok, outTok, amountIn) {
+  const P = S.pool, avail = P.avail || { [P.fee]: { addr: P.addr } };
+  const tiers = Object.entries(avail).filter(([, a]) => a).map(([f]) => Number(f));
+  let best = null;
+  for (const fee of tiers) {
+    try {
+      const q = await quoterR.quoteExactInputSingle.staticCall({ tokenIn: inTok.addr, tokenOut: outTok.addr, amountIn, fee, sqrtPriceLimitX96: 0n });
+      if (!best || q.amountOut > best.out) best = { out: q.amountOut, fee };
+    } catch {}
+  }
+  if (!best) throw new Error('交換の見積もりができませんでした');
+  return best;
+}
 async function quoteSwap() {
   try {
     const P = S.pool;
@@ -874,14 +1049,13 @@ async function quoteSwap() {
       $('swapInfo').innerHTML = 'すでにほぼ必要な比率です。交換は要りません。'; fillAfterSwap(u0, u1); return true;
     }
     $('swapInfo').textContent = '見積もり中…';
-    const q = await quoterR.quoteExactInputSingle.staticCall({ tokenIn: inTok.addr, tokenOut: outTok.addr, amountIn, fee: P.fee, sqrtPriceLimitX96: 0n });
-    const out = q.amountOut;
+    const { out, fee: swapFee } = await bestQuote(inTok, outTok, amountIn);
     const spot = plan.from === 0 ? P.sqrtP ** 2 : 1 / P.sqrtP ** 2; // out生 / in生
     const ideal = Number(amountIn) * spot;
     const impact = Math.max(0, 1 - Number(out) / ideal) * 100; // 手数料込みの目減り
-    S.swapPlan = { inTok, outTok, amountIn, out, from: plan.from, u0, u1 };
+    S.swapPlan = { inTok, outTok, amountIn, out, from: plan.from, u0, u1, fee: swapFee };
     $('swapInfo').innerHTML = `<b>${fmt(toNum(amountIn, inTok.decimals))} ${inTok.symbol}</b> → 約 <b>${fmt(toNum(out, outTok.decimals))} ${outTok.symbol}</b> に交換<br>
-      目減り 約${impact.toFixed(2)}%（プール手数料 ${P.fee / 10000}% ＋ 価格への影響）${impact > 3 ? '<br><span class="warn">目減りが大きいです。量を減らすか、流動性の大きいペアを選んでください。</span>' : ''}`;
+      目減り 約${impact.toFixed(2)}%（交換に使うプールの手数料率 ${swapFee / 10000}% ＋ 価格への影響）${impact > 3 ? '<br><span class="warn">目減りが大きいです。量を減らすか、流動性の大きいペアを選んでください。</span>' : ''}`;
     $('swapGoRow').style.display = '';
     return true;
   } catch (e) { $('swapInfo').innerHTML = `<span class="bad">${errMsg(e)}</span>`; return false; }
@@ -895,7 +1069,7 @@ async function doSwap() {
     const minOut = withSlip(X.out, slip);
     const ethIn = usesEth(X.inTok), ethOut = usesEth(X.outTok);
     if (!ethIn) await ensureAllowance(X.inTok, X.amountIn, CHAIN.router);
-    const params = { tokenIn: X.inTok.addr, tokenOut: X.outTok.addr, fee: P.fee, recipient: ethOut ? ROUTER_THIS : S.account,
+    const params = { tokenIn: X.inTok.addr, tokenOut: X.outTok.addr, fee: X.fee || P.fee, recipient: ethOut ? ROUTER_THIS : S.account,
       amountIn: X.amountIn, amountOutMinimum: minOut, sqrtPriceLimitX96: 0n };
     const calls = [routerIface.encodeFunctionData('exactInputSingle', [params])];
     if (ethOut) calls.push(routerIface.encodeFunctionData('unwrapWETH9', [minOut, S.account]));
@@ -1417,8 +1591,10 @@ $('minTvl').onchange = renderPairs;
 $('btnMore').onclick = loadMorePairs;
 $('pairList').onclick = e => {
   const row = e.target.closest('.pcard'); if (!row) return;
+  if (e.target.closest('details') || e.target.closest('select') || e.target.closest('input')) return;
   if (e.target.closest('[data-star]')) { toggleFav(row.dataset.addr, row.dataset.name); return; }
-  selectPoolAddr(row.dataset.addr);
+  const w = row.dataset.w; // おすすめから選んだときは、その幅を入れる
+  selectPoolAddr(row.dataset.addr).then(() => { if (w && S.pool?.addr?.toLowerCase() === row.dataset.addr) { $('pctIn').value = ''; setRangePct(w === 'full' ? 'full' : Math.round(Number(w) * 100)); } });
 };
 $('btnFav').onclick = () => S.pool && toggleFav(S.pool.addr, `${S.pool.t0.symbol} / ${S.pool.t1.symbol} ${S.pool.fee / 10000}%`);
 $('btnInvert').onclick = () => {
@@ -1439,6 +1615,7 @@ $('pFees').onclick = e => {
   if (a === null) { log(`手数料 ${f / 10000}% のプールはまだありません`); return; }
   loadPool(S.pool.t0.addr, S.pool.t1.addr, f);
 };
+$('totalUsd').oninput = () => { splitTotal(); renderRangeYield(); };
 $('amt0').oninput = () => { S.lastEdited = 0; syncAmounts(0); };
 $('amt1').oninput = () => { S.lastEdited = 1; syncAmounts(1); };
 document.querySelectorAll('.fracs').forEach(g => g.onclick = e => { const b = e.target.closest('[data-frac]'); if (b) fracAmount(Number(g.dataset.i), Number(b.dataset.frac)); });
