@@ -471,7 +471,7 @@ function renderPairs() {
 //   レンジ内の予想ロス：同じ流動性を全価格帯に置いたときの価値÷運用額（集中度）× σ²/8。
 //   レンジを外れるまでの平均日数：対数価格がブラウン運動するとして、±b の幅を抜けるまでの期待時間 b²/σ²（1日あたりσ）。
 //   作り直し1回のコスト：手持ちの約半分を交換する手数料（プール手数料率×0.5）＋ガス代。
-const ANA_KEY = 'nba.ana2.' + CHAIN_KEY, ANA_TTL = 24 * 3600 * 1000, ANA_N = 20, ANA_MIN_TVL = 50000;
+const ANA_KEY = 'nba.ana3.' + CHAIN_KEY, ANA_TTL = 24 * 3600 * 1000, ANA_N = 20, ANA_MIN_TVL = 50000;
 const GAS_UNITS_REBUILD = 750000; // 閉じる＋交換＋作成のガスの目安
 const GAS_UNITS_MINT = 500000;    // 新規作成のガスの目安（使用許可は別）
 const MIN_CAPITAL = 50;           // 運用額の最低（ドル）
@@ -503,7 +503,11 @@ async function analyzePool(p, gasUsd, go = {}) {
   const n = rets.length;
   if (n < 7) return { addr: p.addr, days: closes.length, short: true };
   const mean = rets.reduce((a, b) => a + b, 0) / n;
-  const sd = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / (n - 1)); // 1日の変動
+  const sdClose = Math.sqrt(rets.reduce((a, r) => a + (r - mean) ** 2, 0) / (n - 1)); // 終値どうしの1日の変動
+  // 日中の急な上下（ヒゲ）も入れる：高値と安値の幅から1日の変動を推定（パーキンソンの方法）し、大きい方を使う
+  const hl = rows.map(r => [Number(r[2]), Number(r[3])]).filter(([h, l]) => h > 0 && l > 0 && h >= l);
+  const sdHL = hl.length ? Math.sqrt(hl.reduce((a, [h, l]) => a + Math.log(h / l) ** 2, 0) / (4 * Math.LN2 * hl.length)) : 0;
+  const sd = Math.max(sdClose, sdHL);
   const sigmaY = sd * Math.sqrt(365);                                            // 年率の変動
   const vols = rows.map(r => Number(r[5]));
   const vMean = vols.reduce((a, b) => a + b, 0) / vols.length;
@@ -521,8 +525,23 @@ async function analyzePool(p, gasUsd, go = {}) {
   const [t0, t1] = await Promise.all([token(t0a), token(t1a)]);
   const pc = new ethers.Contract(p.addr, POOL_ABI, rpc);
   const [s0, lact] = await retry(() => Promise.all([pc.slot0(), pc.liquidity()]));
-  return { addr: p.addr, days: closes.length, sd, sigmaY: sigmaY * 100, cv, feeApr, ilApr, net: feeApr - ilApr, out7: 2 * (1 - normCdf(z)) * 100, volUsd, volAvgUsd, volRecentUsd, period: days,
+  const inv = p.base !== t0a; // GeckoTerminal の価格（base の quote 建て）がプールの向き（token1/token0）と逆か
+  const path = rows.map(r => [Number(r[4]), Number(r[2]), Number(r[3])]).filter(([c, h, l]) => c > 0 && h > 0 && l > 0)
+    .map(([c, h, l]) => inv ? [1 / c, 1 / l, 1 / h] : [c, h, l]);
+  return { addr: p.addr, days: closes.length, sd, sdClose, sdHL, sigmaY: sigmaY * 100, cv, feeApr, ilApr, net: feeApr - ilApr, out7: 2 * (1 - normCdf(z)) * 100, volUsd, volAvgUsd, volRecentUsd, period: days, path,
     sqrtP: Number(s0.sqrtPriceX96) / 2 ** 96, lact: Number(lact), d0: t0.decimals, d1: t1.decimals, p0: S.prices[t0a], p1: S.prices[t1a], feePct: p.fee, gasUsd };
+}
+// 過去の実際の値動き（日足の高値・安値）で、この幅を毎日作ったら平均何日で外れたか。外れた例がなければ Infinity
+function pastExitDays(path, upF, downF) {
+  if (!path || path.length < 5) return Infinity;
+  let exposure = 0, exits = 0;
+  for (let i = 0; i < path.length - 1; i++) {
+    const hi = path[i][0] * upF, lo = path[i][0] * downF;
+    let j = i + 1;
+    for (; j < path.length; j++) if (path[j][1] >= hi || path[j][2] <= lo) break;
+    if (j < path.length) { exits++; exposure += j - i - 0.5; } else exposure += path.length - 1 - i; // 最後まで外れなかった分も日数に入れる
+  }
+  return exits ? exposure / exits : Infinity;
 }
 // 価格の幅 [sa, sb]（√価格・生の単位）で預けたときの実質の年利（すべて年率％）
 function modelRange(x, sa, sb, delay = A.opt.delay, C = A.opt.capital) {
@@ -539,7 +558,7 @@ function modelRange(x, sa, sb, delay = A.opt.delay, C = A.opt.capital) {
   if (!inNow) { inPct = 0; days = 0; }
   else if (x.sd > 0) {
     const up = 2 * Math.log(sb / s), down = 2 * Math.log(s / sa);    // 上限・下限までの距離（価格の対数）
-    days = up * down / (x.sd ** 2);                                  // 外れるまでの平均日数
+    days = Math.min(up * down / (x.sd ** 2), pastExitDays(x.path, (sb / s) ** 2, (sa / s) ** 2)); // 外れるまでの平均日数（計算と実績の短い方）
     inPct = days / (days + delay); rebuilds = 365 / (days + delay);
   }
   const gasEach = (x.gasUsd || 0) / C * 100;
@@ -614,7 +633,7 @@ function anaCard(p, i, showRank) {
   const m = p.m, [stTxt, stCls] = stability(p.cv), sel = S.pool?.addr?.toLowerCase();
   return `<div class="pcard ${p.addr === sel ? 'sel' : ''}" data-addr="${p.addr}" data-name="${p.name}" data-w="${m.w}">
     <div class="top">${showRank ? `<span class="chip ${i < 3 ? 'on' : ''}">${i + 1}位</span>` : ''}<div class="avs">${av(syms[0] || '?', p.base || syms[0])}${av(syms[1] || '?', p.quote || syms[1])}</div>
-      <div class="main"><b>${title}</b> ${feeTxt ? `<span class="chip">手数料率 ${feeTxt}</span>` : ''}${p.days < A.opt.days * 0.66 ? ' <span class="chip">データ少なめ</span>' : ''}
+      <div class="main"><b>${title}</b> ${p.j.pass ? '' : '<span class="chip off" title="リスクの条件を満たしていません（理由の✗を確認）">ハイリスク</span> '}${feeTxt ? `<span class="chip">手数料率 ${feeTxt}</span>` : ''}${p.days < A.opt.days * 0.66 ? ' <span class="chip">データ少なめ</span>' : ''}
         <div class="sub" style="margin-top:4px">預け入れ総額 ${usd(p.tvl)}・${periodTxt()}平均の取引額 ${usd(p.volAvgUsd ?? p.volUsd)}/日</div></div>
       <button class="star ${isFav(p.addr) ? 'on' : ''}" data-star="1">${isFav(p.addr) ? '★' : '☆'}</button></div>
     <div class="effRow"><div><small>実質の年利（幅 ${wLabel(m.w)} で運用した場合）</small><b class="${m.eff >= 0 ? 'good' : 'bad'}">${sgn(m.eff)}</b></div>
@@ -951,6 +970,18 @@ function getTicks() {
   if (tu <= tl) tu = tl + sp;
   return [tl, tu];
 }
+// 上限・下限を、値動きする方のトークンのドル価格でも表す（もう片方のドル価格が今のままとして）
+function usdRangeTxt(tl, tu) {
+  const P = S.pool, stableRe = /^(USDG|USDC|USDT|DAI|USDE|PYUSD)$/i;
+  const t = (stableRe.test(P.t0.symbol) || (P.t0.isWeth && !stableRe.test(P.t1.symbol))) ? P.t1 : P.t0; // 説明するトークン
+  const o = t === P.t0 ? P.t1 : P.t0, ou = priceOf(o);
+  if (ou == null) return '';
+  const inO = tick => t === P.t0 ? humanPrice(tickToRaw(tick)) : 1 / humanPrice(tickToRaw(tick)); // t の o 建て価格
+  const a = inO(tl) * ou, b = inO(tu) * ou, now = (t === P.t0 ? humanPrice(P.sqrtP ** 2) : 1 / humanPrice(P.sqrtP ** 2)) * ou;
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  const pctTxt = v => `${v >= now ? '+' : ''}${((v / now - 1) * 100).toFixed(0)}%`;
+  return `<br>${t.symbol}のドル価格に直すと：<b>$${fmt(lo)} 〜 $${fmt(hi)}</b>（今 $${fmt(now)}、${pctTxt(lo)}〜${pctTxt(hi)}。${o.symbol}の価格が今のままの場合）`;
+}
 function updateRange() {
   const T = getTicks();
   if (!T) { $('rangeInfo').innerHTML = '<span class="bad">最小 &lt; 最大 になるように入れてください</span>'; $('ratioTxt').textContent = ''; return; }
@@ -959,7 +990,7 @@ function updateRange() {
   const [mn, mx] = pl < pu ? [pl, pu] : [pu, pl];
   let st = '';
   if (P.tick < tl || P.tick >= tu) st = '<br><span class="warn">今の価格はレンジ外です（片方のトークンだけ入ります・手数料は入りません）</span>';
-  $('rangeInfo').innerHTML = S.full ? 'フルレンジ（全価格帯）' : `実際に使われるレンジ：${fmt(mn)} 〜 ${fmt(mx)}${st}`;
+  $('rangeInfo').innerHTML = S.full ? 'フルレンジ（全価格帯）' : `実際に使われるレンジ：${fmt(mn)} 〜 ${fmt(mx)}${usdRangeTxt(tl, tu)}${st}`;
   const sqrtP = P.sqrtP;
   $('amt0').disabled = sqrtP >= sqrtAt(tu);
   $('amt1').disabled = sqrtP <= sqrtAt(tl);
