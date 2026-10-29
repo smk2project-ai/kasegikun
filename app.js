@@ -1418,6 +1418,7 @@ function posHTML(pos, mine) {
       <div>レンジ（${unit}）</div><div>${fmt(pl)} 〜 ${fmt(pu)}</div>
       <div style="grid-column:1/-1">${uniBlock('ポジション（評価額）', v.val, '', pos, v.a0, v.a1)}</div>
       <div style="grid-column:1/-1">${uniBlock('未回収の手数料', v.fval, 'good', pos, v.f0, v.f1)}</div>
+      ${mine && !closed ? `<div class="ilBox" data-il="${pos.id}" style="grid-column:1/-1;font-size:12px"><span class="sub">ILの損を計算中…</span></div>` : ''}
       ${mine ? '' : `<div>持ち主</div><div class="sub mono">${pos.owner ? pos.owner.slice(0, 10) + '…' : '-'}</div>`}
     </div>
     ${mine ? `<div class="acts">
@@ -1449,7 +1450,46 @@ async function loadPositions() {
       <div class="stat"><div class="sub">ポジション</div><div class="v">${open.length}件 ${outN ? `<span class="bad" style="font-size:13px">レンジ外 ${outN}件</span>` : ''}</div></div>`;
     $('navPos').textContent = open.length ? `私の流動性（${open.length}）` : '私の流動性';
     $('posList').innerHTML = list.length ? `<div class="posGrid">${list.map(p => posHTML(p, true)).join('')}</div>` : '<div class="empty">このウォレットのポジションはまだありません。</div>';
+    // LINE の「作り直しの目安」から開いたときは、そのポジションの作り直し画面を出す
+    const rb = S.pendingRebuild && S.positions[S.pendingRebuild];
+    if (rb) { S.pendingRebuild = null; if (rb.L > 0n) startRebuild(rb); else alert(`#${rb.id} はもう閉じています。`); }
+    else if (S.pendingRebuild) { alert(`#${S.pendingRebuild} はこのウォレットのポジションではありません。メタマスクのウォレットを確かめてください。`); S.pendingRebuild = null; }
+    fillIL(open);
   } catch (e) { $('posList').innerHTML = `<div class="empty">読み込みエラー：${errMsg(e)}</div>`; }
+}
+
+// ===== 作り直しの目安（社長の決定 2026-10-29、半自動） =====
+// レンジ外になってもすぐ作り直さず、ILの損が IL_LIMIT% 以内に戻るのを待つ。知らせは LINE（gas/monitor）、作り直すかは人が決める。
+// IL＝今の評価額 ÷ 預けたトークンをそのまま持っていた場合の評価額 − 1（手数料は含めない）。画面ではこのポジションを作った時と比べる。
+const IL_LIMIT = 10;
+const plTxt = x => `${x >= 0 ? '+' : '−'}${Math.abs(x * 100).toFixed(1)}%`;
+async function fillIL(list) {
+  if (S.ilBusy) return; S.ilBusy = true;
+  try {
+    const latest = await retry(() => rpc.getBlockNumber());
+    for (const pos of list) {
+      const el = document.querySelector(`[data-il="${pos.id}"]`); if (!el) continue;
+      let html;
+      try {
+        // 預けた量：追加の合計を、今の流動性の分だけにする（一部引き出していれば減らす）
+        const inc = (await positionEvents(pos, latest)).filter(e => e.k === 'inc');
+        const incL = inc.reduce((s, e) => s + BigInt(e.liq), 0n);
+        if (!incL) throw new Error('預けた記録が見つかりません');
+        const k = Number(pos.L) / Number(incL), P = pos.sqrtP ** 2; // P は token1 ÷ token0（最小単位どうし）
+        const b0 = inc.reduce((s, e) => s + Number(e.a0), 0) * k, b1 = inc.reduce((s, e) => s + Number(e.a1), 0) * k;
+        const hold = b0 * P + b1, lp = pos.amt[0] * P + pos.amt[1], fee = Number(pos.fees[0]) * P + Number(pos.fees[1]);
+        const il = lp / hold - 1, pl = (lp + fee) / hold - 1, loss = Math.max(0, -il * 100);
+        const inRange = pos.tick >= pos.tl && pos.tick < pos.tu;
+        html = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>ILの損 <b class="${loss > IL_LIMIT ? 'bad' : ''}">${loss.toFixed(1)}%</b></span>
+          <span>手数料込みの損益 <b class="${pl >= 0 ? 'good' : 'bad'}">${plTxt(pl)}</b></span></div>
+          <div class="sub">このポジションを作った時と比べて（預けたトークンをそのまま持っていた場合との差）</div>`
+          + (inRange ? '' : loss > IL_LIMIT
+            ? `<div class="warn" style="margin-top:4px">⏳ 回復待ち：ILの損が${IL_LIMIT}%以内に戻るまで、作り直さずに待ちます（LINEでお知らせ）</div>`
+            : `<div class="good" style="margin-top:4px">ILの損は${IL_LIMIT}%以内（作り直しの目安の範囲）。作り直すかは値動きを見て決めてください</div>`);
+      } catch (e) { html = `<span class="sub">ILの損：計算できませんでした（${errMsg(e).slice(0, 60)}）。LINEの通知で確認してください</span>`; }
+      el.innerHTML = html;
+    }
+  } catch {} finally { S.ilBusy = false; }
 }
 
 // 受け取り：WETHをETHに戻す場合は collect先をNPMにして unwrap＋sweep
@@ -1812,6 +1852,8 @@ if (window.ethereum) {
   });
   autoReconnect();
 }
+S.pendingRebuild = (new URLSearchParams(location.search).get('rebuild') || '').replace(/\D/g, '') || null;
+if (S.pendingRebuild) { showView('pos'); if (!window.ethereum) alert('メタマスクが見つかりません。メタマスクを入れたChromeで開いてください。'); else log(`#${S.pendingRebuild} の作り直し画面を開きます。メタマスクにつながっていなければ「メタマスクに接続」を押してください。`); }
 updateGas(); setInterval(updateGas, 30000);
 selectPoolAddr((L.favs[0] || DEFAULT_FAVS[0]).addr);
 (async () => { for (let i = 0; i < 2; i++) await loadMorePairs(); })(); // 最初は40件
