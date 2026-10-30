@@ -175,9 +175,44 @@ function showView(v) {
   $('viewPair').style.display = v === 'pair' ? '' : 'none';
   $('viewPos').style.display = v === 'pos' ? '' : 'none';
   $('viewEarn').style.display = v === 'earn' ? '' : 'none';
+  $('viewResearch').style.display = v === 'research' ? '' : 'none';
+  $('navResearch').classList.toggle('on', v === 'research');
   $('navEarn').classList.toggle('on', v === 'earn');
   $('navPair').classList.toggle('on', v === 'pair');
   $('navPos').classList.toggle('on', v === 'pos');
+}
+
+// ===== 調査（読むだけ）：見張りの GAS が DefiLlama などから作った一覧を表示する =====
+const RESEARCH_URL = 'https://script.google.com/macros/s/AKfycbxQXxeS_gongRB7EmUSjIMJohriB1pjZQ-7iPIwkz_xbmjlvcUkSPQBW8B2MQuG-H4o/exec?mode=research';
+const RS_KIND = { lp: 'ファーミング（流動性提供）', lend: 'レンディング', loop: 'ループ', dn: 'デルタニュートラル', pendle: 'Pendle' };
+const RS = { data: null, loading: false };
+async function loadResearch(force) {
+  if (RS.loading || (RS.data && !force)) return renderResearch();
+  RS.loading = true; $('rsMsg').textContent = '読み込み中…（初回は20秒ほどかかります）';
+  try {
+    const j = await (await fetch(RESEARCH_URL)).json();
+    if (!j || j.error || !Array.isArray(j.rows)) throw new Error((j && j.error) || '形式が違います');
+    RS.data = j;
+    const fill = (id, vals, label) => { const el = $(id), cur = el.value; el.innerHTML = `<option value="">${label}：すべて</option>` + vals.map(v => `<option value="${clean(v)}">${clean(RS_KIND[v] || v)}</option>`).join(''); el.value = cur; };
+    fill('rsKind', Object.keys(RS_KIND), '運用方法');
+    fill('rsChain', [...new Set(j.rows.map(x => x.c))], 'チェーン');
+  } catch (e) { $('rsMsg').textContent = '読み込めませんでした：' + clean(e.message || e); RS.loading = false; return; }
+  RS.loading = false;
+  renderResearch();
+}
+function renderResearch() {
+  const j = RS.data;
+  if (!j) return;
+  const k = $('rsKind').value, c = $('rsChain').value, r = $('rsRisk').value;
+  const rows = j.rows.filter(x => (!k || x.k === k) && (!c || x.c === c) && (r === 'nohigh' ? x.r !== '高' : r === 'low' ? x.r === '低' : true));
+  const n = x => x == null ? '-' : `${Number(x).toFixed(2)}%`;
+  const cls = { 低: 'good', 中: 'warn', 高: 'bad' };
+  $('rsMsg').textContent = `${new Date(j.at).toLocaleString('ja-JP')} 時点・${rows.length}件（全${j.total}件から運用方法・チェーンごとの上位をしぼっています）`;
+  $('rsTable').innerHTML = rows.length ? `<table class="tbl"><tr><th>中身</th><th>運用方法</th><th>年利（くらべる値）</th><th>今</th><th>30日平均</th><th>報酬分</th><th>預け入れ総額</th><th>リスクと理由</th></tr>`
+    + rows.map(x => `<tr><td class="name"><b>${clean(x.c)}</b> ${clean(x.p)}<br>${clean(x.s)}${x.m ? `<div class="sub">${clean(x.m)}</div>` : ''}${/^[0-9a-f-]{36}$/.test(x.id || '') ? `<br><a class="sub" href="https://defillama.com/yields/pool/${x.id}" target="_blank" rel="noopener noreferrer">${x.k === 'loop' || x.k === 'dn' ? 'DefiLlamaで元のプールを見る' : 'DefiLlamaで見る'}</a>` : ''}</td>`
+      + `<td>${clean(RS_KIND[x.k] || x.k)}</td><td class="apr">${n(x.y)}</td><td>${n(x.now)}</td><td>${n(x.a30)}</td><td>${x.rew ? n(x.rew) : '-'}</td><td>${usd(x.tvl)}</td>`
+      + `<td class="why"><b class="${cls[x.r] || ''}">${clean(x.r)}</b>　${(x.why || []).map(clean).join('、')}</td></tr>`).join('') + '</table>'
+    : '<div class="empty">条件に合うものがありません。</div>';
 }
 
 // ===== ウォレット =====
@@ -1765,6 +1800,9 @@ $('navPair').onclick = () => showView('pair');
 $('navPos').onclick = () => { showView('pos'); if (S.account) loadPositions(); };
 $('navEarn').onclick = () => { showView('earn'); loadEarnings(); };
 $('btnEarnReload').onclick = () => loadEarnings(true);
+$('navResearch').onclick = () => { showView('research'); loadResearch(); };
+$('btnResearchReload').onclick = () => loadResearch(true);
+['rsKind', 'rsChain', 'rsRisk'].forEach(id => { $(id).onchange = renderResearch; });
 $('btnPfReload').onclick = loadPortfolio;
 document.querySelectorAll('#pickTabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('#pickTabs button').forEach(x => x.classList.toggle('on', x === b));

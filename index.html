@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- 通信できる先・読み込めるファイルを限定（チェーンのRPCと価格サービスだけ） -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://rpc.mainnet.chain.robinhood.com https://arb1.arbitrum.io https://mainnet.base.org https://api.geckoterminal.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src https://rpc.mainnet.chain.robinhood.com https://arb1.arbitrum.io https://mainnet.base.org https://api.geckoterminal.com https://script.google.com https://script.googleusercontent.com; base-uri 'none'; form-action 'none'; object-src 'none'">
 <title>稼ぎ君 流動性管理</title>
 <script src="lib/ethers.umd.min.js"></script>
 <style>
@@ -140,6 +140,9 @@ details.box summary{cursor:pointer;font-weight:600}
 .hrow{background:var(--panel2);border-radius:10px;padding:10px 12px}
 .hrow .t{display:flex;justify-content:space-between;font-size:12px;color:var(--sub)}
 .hrow .v{font-size:16px;font-weight:700;margin:2px 0}
+.researchView .filters{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.researchView .tbl td.why{text-align:left;white-space:normal;min-width:180px;color:var(--sub);font-size:12px}
+.researchView .tbl td.name{white-space:normal;min-width:200px}
 .earnView{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px}
 @media(max-width:1250px){.earnView{grid-template-columns:minmax(0,1fr)}}
 /* トークン選択 */
@@ -177,6 +180,7 @@ details.box summary{cursor:pointer;font-weight:600}
     <button id="navPair" class="on">ペアを選ぶ</button>
     <button id="navPos">運用中のペア</button>
     <button id="navEarn">収益のまとめ</button>
+    <button id="navResearch">調査</button>
   </nav>
   <select id="chainSel" title="チェーン"></select>
   <span id="gasChip" class="chip" title="今のガス代の相場（取引1回の手数料の目安）">Gas: -</span>
@@ -367,7 +371,24 @@ details.box summary{cursor:pointer;font-weight:600}
       <h2 style="font-size:14px">操作ログ</h2>
       <div id="log"></div>
     </div>
-  </main>
+  
+    <!-- 調査（読むだけ） -->
+    <div id="viewResearch" class="researchView" style="display:none">
+      <div class="card">
+        <div class="row between"><h2 style="margin:0">調査（読むだけ）</h2><button class="link" id="btnResearchReload">リロード</button></div>
+        <div class="sub">7つのチェーン（イーサリアム・アービトラム・モナド・ロビンフッド・プラズマ・ソラナ・ベース）と、Uniswap・Aerodrome・Morpho・Pendle・Re・Aave・Fluid・Compound の利回りを、運用方法ごとにくらべます。
+          データは DefiLlama（ロビンフッドの Uniswap は GeckoTerminal の24時間の取引額から計算）。<b>年利は「今」と「30日平均」の低い方</b>で並べ、リスクの目安（低・中・高）と理由を付けています。
+          ループ・デルタニュートラルは貸し借りの率から計算した目安です。過去の数字なので、これからの利回りの約束ではありません。ここから取引はしません。</div>
+        <div class="filters">
+          <select id="rsKind"><option value="">運用方法：すべて</option></select>
+          <select id="rsChain"><option value="">チェーン：すべて</option></select>
+          <select id="rsRisk"><option value="nohigh">リスク高を除く</option><option value="">リスク：すべて</option><option value="low">リスク低だけ</option></select>
+        </div>
+        <div class="sub" id="rsMsg">読み込み中…</div>
+        <div style="overflow-x:auto" id="rsTable"></div>
+      </div>
+    </div>
+</main>
 </div>
 
 <!-- トークンを選択 -->
@@ -380,6 +401,6 @@ details.box summary{cursor:pointer;font-weight:600}
   </div>
 </div>
 
-<script src="app.js?v=20261029162435"></script>
+<script src="app.js?v=20261030171643"></script>
 </body>
 </html>
