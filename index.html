@@ -346,13 +346,17 @@ details.box summary{cursor:pointer;font-weight:600}
       <section>
         <div class="card">
           <div class="row between"><h2 style="margin:0">収益概要</h2><button class="link" id="btnEarnReload">リロード</button></div>
-          <div class="sub" style="margin-bottom:12px">接続したウォレットのポジションの記録をチェーンから読んで集計します。ドル換算は<b>今の価格</b>で計算しています。</div>
+          <div class="sub" style="margin-bottom:12px">接続したウォレットのポジションの記録をチェーンから読んで集計します。入れた額・引き出した額・回収した手数料は<b>その時の値段</b>、今の評価額・未回収の手数料は<b>今の値段</b>で換算します。</div>
           <div class="row" id="earnStats"><div class="empty">メタマスクに接続すると表示されます。</div></div>
           <div class="sub" id="earnMsg"></div>
         </div>
         <div class="card">
           <h2>月ごとの手数料収入（回収した分）</h2>
           <div id="earnBars"><div class="empty">-</div></div>
+        </div>
+        <div class="card">
+          <h2>日ごとの手数料（回収した日）</h2>
+          <div style="overflow-x:auto" id="earnDays"><div class="empty">-</div></div>
         </div>
         <div class="card">
           <h2>ポジション別</h2>
@@ -401,6 +405,6 @@ details.box summary{cursor:pointer;font-weight:600}
   </div>
 </div>
 
-<script src="app.js?v=20261030171643"></script>
+<script src="app.js?v=20261106001421"></script>
 </body>
 </html>

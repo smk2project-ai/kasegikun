@@ -1706,6 +1706,37 @@ async function fillTimestamps(evs) {
   store.set(key, bts);
   evs.forEach(e => { if (!e.ts) e.ts = bts[e.block] || 0; });
 }
+// その時の値段：プールの1時間足（ドル建て）をトークンごとに最大1000本まとめて取り、ブラウザに保存する（過去の値段は変わらない）。
+// その時刻を含む足の始値と終値の間を時間で割り振る。取引のない時間は足が無いので、前でいちばん近い足の終値を使う。@return 時刻(秒) → ドル価格（分からなければ null）
+async function histPrices(pool, addr, times) {
+  const key = `nba.pxh2.${CHAIN_KEY}.${pool.toLowerCase()}.${addr.toLowerCase()}`, c = store.get(key, { h: {}, cov: [] });
+  const covered = t => c.cov.some(([lo, hi]) => t >= lo && t <= hi);
+  const nowHi = Math.floor(Date.now() / 1000) - 3600;   // 直近1時間は足が変わるので「取得済み」にしない
+  let recentDone = false;
+  for (let n = 0; n < 4; n++) {
+    const miss = times.filter(t => t && !covered(t) && !(recentDone && t > nowHi));
+    if (!miss.length) break;
+    const before = Math.max(...miss) + 3600;
+    const j = await gecko(`/networks/${CHAIN.gecko}/pools/${pool}/ohlcv/hour?aggregate=1&limit=1000&currency=usd&token=${addr}&before_timestamp=${before}`);
+    const list = j?.data?.attributes?.ohlcv_list || [];
+    list.forEach(r => { if (Number(r[4]) > 0) c.h[r[0]] = [Number(r[1]), Number(r[4])]; });   // [始値, 終値]
+    const lo = list.length < 1000 ? 0 : Math.min(...list.map(r => r[0]));
+    const hi = Math.min(before, nowHi);
+    if (hi > lo) c.cov.push([lo, hi]);
+    if (before > nowHi) recentDone = true;   // 直近の分はこの回の足で足りる（次の読み込みで取り直す）
+  }
+  store.set(key, c);
+  const ks = Object.keys(c.h).map(Number).sort((a, b) => a - b);
+  return t => {
+    if (!t || !ks.length) return null;
+    let k = null;
+    for (const x of ks) { if (x <= t) k = x; else break; }
+    if (k == null) return Math.abs(ks[0] - t) <= 3600 ? c.h[ks[0]][0] : null;
+    const [o, cl] = c.h[k], dt = t - k;
+    if (dt < 3600) return o + (cl - o) * dt / 3600;
+    return dt <= 3 * 86400 ? cl : null;   // 3日以上前の足しかなければ分からない扱い
+  };
+}
 async function loadEarnings(force) {
   if (!S.account) { $('earnStats').innerHTML = '<div class="empty">メタマスクに接続すると表示されます。</div>'; return; }
   if (E.busy) return; E.busy = true;
@@ -1723,6 +1754,11 @@ async function loadEarnings(force) {
     }
     await fillTimestamps(evsList.flat());
     list.forEach((p, i) => sums.push(summarizePosition(p, evsList[i])));
+    for (const [i, s] of sums.entries()) {   // 入れた時・引き出した時・回収した時の値段
+      $('earnMsg').textContent = `その時の値段を調べています… ${i + 1} / ${sums.length}（#${s.pos.id}）`;
+      const times = s.txs.map(g => g.ts).filter(Boolean);
+      try { s.px = [await histPrices(s.pos.pool, s.pos.t0.addr, times), await histPrices(s.pos.pool, s.pos.t1.addr, times)]; } catch { s.px = null; }
+    }
     $('earnMsg').textContent = '';
     await ensurePrices(list.flatMap(p => [p.t0.addr, p.t1.addr]));
     renderEarnings(sums);
@@ -1732,32 +1768,53 @@ async function loadEarnings(force) {
 function renderEarnings(sums) {
   const val = (t, raw) => { const p = priceOf(t); return p != null ? toNum(raw, t.decimals) * p : null; };
   const pair = (pos, a) => { const v0 = val(pos.t0, a[0]), v1 = val(pos.t1, a[1]); return v0 == null || v1 == null ? null : v0 + v1; };
-  const tot = { dep: 0, wd: 0, fee: 0, unc: 0, cur: 0 }, rows = [], hist = [], months = {};
+  // その時の値段で換算。分からないときは今の値段（印を付ける）
+  let approx = false;
+  const atTime = (s, a, ts) => {
+    const P = s.pos, p0 = s.px?.[0]?.(ts), p1 = s.px?.[1]?.(ts);
+    if (p0 == null || p1 == null) { approx = true; const u = pair(P, a); return { u, approx: true }; }
+    const v0 = toNum(a[0], P.t0.decimals) * p0, v1 = toNum(a[1], P.t1.decimals) * p1;
+    return { u: v0 + v1, p0, p1, r0: v0 + v1 > 0 ? v0 / (v0 + v1) : NaN };
+  };
+  const usdPx = x => x == null || !isFinite(x) ? '-' : x >= 1 ? '$' + x.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '$' + x.toPrecision(4);
+  const ratioTxt = (P, r) => isFinite(r) ? `${P.t0.symbol} ${Math.round(r * 100)}%：${P.t1.symbol} ${Math.round((1 - r) * 100)}%` : '';
+  const dayKey = d => `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  const md = d => d ? `${d.getMonth() + 1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}` : '';
+  const tot = { dep: 0, wd: 0, fee: 0, unc: 0, cur: 0 }, rows = [], hist = [], months = {}, days = {};
   let missing = false;
   for (const s of sums) {
     const P = s.pos, v = posValues(P);
-    const r = { dep: pair(P, s.dep), wd: pair(P, s.wd), fee: pair(P, s.fee), unc: v.fval, cur: P.L > 0n ? v.val : 0 };
-    if (Object.values(r).some(x => x == null)) missing = true;
-    for (const k in tot) tot[k] += r[k] || 0;
-    r.pl = (r.cur || 0) + (r.wd || 0) + (r.fee || 0) + (r.unc || 0) - (r.dep || 0);
-    rows.push({ P, r });
-    for (const g of s.txs) {
+    const r = { dep: 0, wd: 0, fee: 0, unc: v.fval, cur: P.L > 0n ? v.val : 0 };
+    let first = null, incN = 0, lastTs = 0, firstTs = 0;
+    for (const g of [...s.txs].sort((a, b) => a.block - b.block)) {
       const d = g.ts ? new Date(g.ts * 1000) : null;
-      const push = (kind, a, sign) => { const u = pair(P, a); hist.push({ ts: g.ts, d, kind, P, a, u, tx: g.tx, sign }); return u; };
-      if (g.inc[0] || g.inc[1]) push(g.mint ? 'ペアを作成' : '流動性を追加', g.inc);
-      if (g.dec[0] || g.dec[1]) push('引き出し', g.dec);
+      if (g.ts) { firstTs = firstTs || g.ts; lastTs = g.ts; }
+      const push = (kind, a, sign) => { const x = atTime(s, a, g.ts); hist.push({ ts: g.ts, d, kind, P, a, x, tx: g.tx, sign }); if (x.u == null) missing = true; return x; };
+      if (g.inc[0] || g.inc[1]) { const x = push(g.mint ? 'ペアを作成' : '流動性を追加', g.inc); r.dep += x.u || 0; incN++; if (!first) first = { d, x }; }
+      if (g.dec[0] || g.dec[1]) r.wd += push('引き出し', g.dec).u || 0;
       if (g.fee[0] || g.fee[1]) {
-        const u = push('手数料を回収', g.fee, '+');
-        if (d && u != null) { const m = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`; months[m] = (months[m] || 0) + u; }
+        const x = push('手数料を回収', g.fee, '+'); r.fee += x.u || 0;
+        if (d && x.u != null) {
+          const m = `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}`; months[m] = (months[m] || 0) + x.u;
+          const k = dayKey(d); (days[k] = days[k] || { u: 0, by: {} }).u += x.u; days[k].by[P.id] = (days[k].by[P.id] || 0) + x.u;
+        }
       }
     }
+    if ([r.unc, r.cur].some(x => x == null)) missing = true;
+    for (const k in tot) tot[k] += r[k] || 0;
+    r.pl = (r.cur || 0) + (r.wd || 0) + (r.fee || 0) + (r.unc || 0) - (r.dep || 0);
+    const endTs = P.L > 0n ? Date.now() / 1000 : lastTs;   // 閉じたものは最後の記録まで
+    r.days = firstTs ? Math.max(1, (endTs - firstTs) / 86400) : NaN;
+    r.perDay = ((r.fee || 0) + (r.unc || 0)) / r.days;
+    rows.push({ P, r, s, first, incN });
   }
   const pl = tot.cur + tot.wd + tot.fee + tot.unc - tot.dep;
   const stat = (label, v, cls = '') => `<div class="stat"><div class="sub">${label}</div><div class="v ${cls}">${usd(v)}</div></div>`;
-  $('earnStats').innerHTML = stat('入れた額の合計', tot.dep) + stat('引き出した額', tot.wd) + stat('回収した手数料', tot.fee, 'good')
+  $('earnStats').innerHTML = stat('入れた額の合計（入れた時の値段）', tot.dep) + stat('引き出した額', tot.wd) + stat('回収した手数料', tot.fee, 'good')
     + stat('未回収の手数料', tot.unc, 'good') + stat('今の評価額', tot.cur) + `<div class="stat"><div class="sub">損益</div><div class="v ${pl >= 0 ? 'good' : 'bad'}">${pl >= 0 ? '+' : '−'}${usd(Math.abs(pl))}</div></div>`;
   $('earnMsg').innerHTML = (missing ? '<span class="warn">価格が分からないトークンがあり、一部のドル換算が入っていません。</span><br>' : '')
-    + '損益＝今の評価額＋引き出した額＋回収した手数料＋未回収の手数料−入れた額（すべて今の価格で換算）。価格の上下による増減（インパーマネントロス）もここに含まれます。';
+    + (approx ? '<span class="warn">※ その時の値段が分からなかった分は、今の値段で換算しています（印 ※）。</span><br>' : '')
+    + '損益＝今の評価額＋未回収の手数料（今の値段）＋引き出した額＋回収した手数料（それぞれその時の値段）−入れた額（入れた時の値段）。値下がり・値上がりによる増減もここに含まれます。';
   // 月ごとの手数料
   const keys = Object.keys(months).sort().slice(-12);
   if (!keys.length) $('earnBars').innerHTML = '<div class="empty">まだ手数料の回収はありません。</div>';
@@ -1766,26 +1823,38 @@ function renderEarnings(sums) {
     $('earnBars').innerHTML = `<div class="bars">${keys.map(k => `<div class="b"><span>${usd(months[k])}</span><i style="height:${Math.max(2, months[k] / max * 120)}px"></i></div>`).join('')}</div>
       <div class="blabels">${keys.map(k => `<span>${k}</span>`).join('')}</div>`;
   }
+  // 日ごとの手数料（回収した日）
+  const dks = Object.keys(days).sort().reverse().slice(0, 31);
+  $('earnDays').innerHTML = dks.length ? `<table class="tbl"><tr><th>日付</th><th>回収した手数料</th><th>内訳</th></tr>
+    ${dks.map(k => `<tr><td>${k}</td><td class="good">+${usd(days[k].u)}</td><td class="sub">${Object.entries(days[k].by).map(([id, u]) => {
+      const P = sums.find(x => String(x.pos.id) === id)?.pos; return `#${id}${P ? ' ' + P.t0.symbol + '/' + P.t1.symbol : ''} ${usd(u)}`; }).join('　')}</td></tr>`).join('')}</table>
+    <div class="sub" style="margin-top:6px">稼ぎ君は自動では回収しないので、回収した日にまとめて出ます。毎日どれくらいたまっているかは「ポジション別」の「1日あたり」（未回収の分も含む）を見てください。</div>`
+    : '<div class="empty">まだ手数料の回収はありません。</div>';
   // ポジション別
   rows.sort((a, b) => Number(b.P.id - a.P.id));
   const f = x => x == null ? '-' : usd(x);
-  $('earnTable').innerHTML = `<table class="tbl"><tr><th>ポジション</th><th>状態</th><th>入れた額</th><th>引き出した額</th><th title="回収した分＋未回収の分">手数料</th><th>今の評価額</th><th>損益</th></tr>
-    ${rows.map(({ P, r }) => {
+  $('earnTable').innerHTML = `<table class="tbl"><tr><th>ポジション</th><th>状態</th><th>入れた日・その時の値段</th><th>入れた額</th><th>引き出した額</th><th title="回収した分＋未回収の分">手数料</th><th title="手数料（回収した分＋未回収の分）÷ 入れてからの日数">1日あたり</th><th>今の評価額</th><th>損益</th></tr>
+    ${rows.map(({ P, r, s, first, incN }) => {
       const inR = P.tick >= P.tl && P.tick < P.tu, st = P.L === 0n ? '閉じた' : inR ? '<span class="good">レンジ内</span>' : '<span class="bad">レンジ外</span>';
-      const memo = memos()[String(P.id)];
+      const memo = memos()[String(P.id)], x = first?.x;
+      const when = first ? `${md(first.d)}${incN > 1 ? `<br><span class="sub">ほか追加 ${incN - 1}回</span>` : ''}
+        ${x && !x.approx ? `<br><span class="sub">1 ${P.t0.symbol} = ${usdPx(x.p0)}<br>1 ${P.t1.symbol} = ${usdPx(x.p1)}<br>${ratioTxt(P, x.r0)}</span>` : '<br><span class="sub">その時の値段は不明</span>'}` : '-';
       return `<tr><td><b>${P.t0.symbol}/${P.t1.symbol}</b> <span class="sub">${P.fee / 10000}%</span><br><span class="sub">#${P.id}${memo ? '　' + memo : ''}</span></td><td>${st}</td>
-        <td>${f(r.dep)}</td><td>${f(r.wd)}</td><td class="good">${f((r.fee || 0) + (r.unc || 0))}</td><td>${f(r.cur)}</td>
+        <td style="vertical-align:top">${when}</td>
+        <td style="vertical-align:top">${f(r.dep)}${first?.x?.approx ? ' ※' : ''}<br><span class="sub">${fmt(toNum(s.dep[0], P.t0.decimals))} ${P.t0.symbol}<br>${fmt(toNum(s.dep[1], P.t1.decimals))} ${P.t1.symbol}</span></td>
+        <td>${f(r.wd)}</td><td class="good">${f((r.fee || 0) + (r.unc || 0))}</td><td class="good">${isFinite(r.perDay) ? usd(r.perDay) : '-'}<br><span class="sub">${isFinite(r.days) ? Math.round(r.days) + '日' : ''}</span></td><td>${f(r.cur)}</td>
         <td class="${r.pl >= 0 ? 'good' : 'bad'}">${r.pl >= 0 ? '+' : '−'}${usd(Math.abs(r.pl))}</td></tr>`;
     }).join('')}</table>`;
   // 操作履歴
   hist.sort((a, b) => b.ts - a.ts);
   const day0 = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-  const ago = d => { if (!d) return ''; const days = Math.round((day0(new Date()) - day0(d)) / 864e5); return days <= 0 ? '今日' : days === 1 ? '昨日' : `${days}日前`; };
+  const ago = d => { if (!d) return ''; const n = Math.round((day0(new Date()) - day0(d)) / 864e5); return n <= 0 ? '今日' : n === 1 ? '昨日' : `${n}日前`; };
   $('earnHist').innerHTML = hist.length ? hist.slice(0, 150).map(h => `<div class="hrow">
       <div class="t"><span>${ago(h.d)}</span><span>${h.d ? h.d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><b>${h.kind}</b><span class="sub">#${h.P.id} ${h.P.t0.symbol}/${h.P.t1.symbol}</span></div>
-      <div class="v ${h.sign ? 'good' : ''}">${h.u != null ? (h.sign || '') + usd(h.u) : '-'}</div>
+      <div class="v ${h.sign ? 'good' : ''}">${h.x.u != null ? (h.sign || '') + usd(h.x.u) + (h.x.approx ? ' ※' : '') : '-'}</div>
       <div class="sub">${fmt(toNum(h.a[0], h.P.t0.decimals))} ${h.P.t0.symbol}　${fmt(toNum(h.a[1], h.P.t1.decimals))} ${h.P.t1.symbol}　<a href="${CHAIN.explorer}/tx/${h.tx}" target="_blank">取引</a></div>
+      ${!h.sign && !h.x.approx ? `<div class="sub">その時の値段：1 ${h.P.t0.symbol} = ${usdPx(h.x.p0)}・1 ${h.P.t1.symbol} = ${usdPx(h.x.p1)}${h.kind !== '引き出し' ? `／割合 ${ratioTxt(h.P, h.x.r0)}` : ''}</div>` : ''}
     </div>`).join('') : '<div class="empty">記録がありません。</div>';
 }
 
